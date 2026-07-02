@@ -9,3 +9,5 @@ requests
 openai>=1.0.0
 langgraph>=0.0.20
 langchain-core>=0.1.0
+# Dev/test
+pytest>=8.0.0

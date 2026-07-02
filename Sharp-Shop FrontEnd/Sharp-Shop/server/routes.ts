@@ -231,6 +231,21 @@ export async function registerRoutes(
     }
   });
 
+  // Products from shops this user/guest follows (the "Following" feed)
+  app.get("/api/feed/following/:userId", async (req, res) => {
+    try {
+      const targetId = req.params.userId;
+      if (!targetId.startsWith("guest_") &&
+          (!req.isAuthenticated() || String(req.user!.id) !== targetId)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const products = await storage.getProductsFromFollowedTraders(targetId);
+      res.json(products);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch following feed" });
+    }
+  });
+
   app.post("/api/follows", async (req, res) => {
     try {
       const parsed = insertFollowSchema.safeParse({

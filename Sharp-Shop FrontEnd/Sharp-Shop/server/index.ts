@@ -3,6 +3,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupAuth } from "./auth";
 import { serveStatic } from "./static";
+import { initSessionStore } from "./storage";
 import { createServer } from "http";
 
 const app = express();
@@ -70,6 +71,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await initSessionStore();
   setupAuth(app);
   await registerRoutes(httpServer, app);
 

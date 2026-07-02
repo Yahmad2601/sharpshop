@@ -57,8 +57,13 @@ export function ChatMessages({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    // Only nudge to the newest message when the list changes. "nearest" +
+    // "auto" scrolls the message container itself without smooth-scrolling the
+    // whole page — which on mobile caused the input/layout to jump while typing.
+    if (messages.length > 0) {
+      scrollRef.current?.scrollIntoView({ behavior: "auto", block: "nearest" });
+    }
+  }, [messages.length]);
 
   return (
     <ScrollArea className="flex-1 p-4 bg-[#121212]">

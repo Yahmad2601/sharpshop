@@ -51,7 +51,7 @@ export function ProductChatModal({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-0 left-0 right-0 z-50 h-[85vh] bg-[#1a1a1a] rounded-t-3xl shadow-2xl flex flex-col overflow-hidden md:max-w-[430px] md:mx-auto"
+            className="fixed bottom-0 left-0 right-0 z-50 h-[65dvh] max-h-[560px] bg-[#1a1a1a] rounded-t-3xl shadow-2xl flex flex-col overflow-hidden md:max-w-[430px] md:mx-auto"
           >
             <ChatHeader traderName={traderName} onClose={onClose} />
             <ChatMessages

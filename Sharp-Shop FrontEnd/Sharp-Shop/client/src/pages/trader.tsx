@@ -20,6 +20,7 @@ import { motion } from "framer-motion";
 import { CustomerChat } from "@/components/CustomerChat";
 import { useFollow } from "@/hooks/use-follow";
 import { useToast } from "@/hooks/use-toast";
+import { shareLink } from "@/lib/share";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
@@ -35,16 +36,14 @@ export default function TraderProfile() {
   const { followerCount, isFollowing, toggleFollow } = useFollow(traderId);
 
   const handleShare = async () => {
-    const url = window.location.href;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "SharpShop", text: "Check out this shop on SharpShop!", url });
-      } else {
-        await navigator.clipboard.writeText(url);
-        toast({ title: "Link copied!", description: "Shop link copied to clipboard." });
-      }
-    } catch {
-      /* user dismissed the share sheet — ignore */
+    const result = await shareLink(window.location.href, {
+      title: "SharpShop",
+      text: "Check out this shop on SharpShop!",
+    });
+    if (result === "copied") {
+      toast({ title: "Link copied!", description: "Shop link copied to clipboard." });
+    } else if (result === "failed") {
+      toast({ title: "Couldn't share", description: "Please copy the link from your address bar.", variant: "destructive" });
     }
   };
 

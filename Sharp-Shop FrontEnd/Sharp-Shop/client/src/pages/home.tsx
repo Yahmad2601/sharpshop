@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { type Product, type ProductCategory } from "@shared/schema";
@@ -9,7 +9,8 @@ import { CategoryFilter } from "@/components/CategoryFilter";
 import { AuthModal } from "@/components/AuthModal";
 import { useFavorites } from "@/hooks/use-favorites";
 import { useAuth } from "@/contexts/AuthContext";
-import { AlertCircle, RefreshCw, Search, Heart, User, LogOut, LayoutDashboard } from "lucide-react";
+import { getGuestId } from "@/lib/guest";
+import { AlertCircle, RefreshCw, Search, Heart, User, LogOut, LayoutDashboard, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -21,17 +22,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-function FeedContent({ products }: { products: Product[] }) {
+function FeedContent({ products, storageKey }: { products: Product[]; storageKey: string }) {
   const feedRef = useRef<HTMLDivElement>(null);
   const previousProductCountRef = useRef<number>(products.length);
+  const key = `feedScroll:${storageKey}`;
 
-  // Auto-scroll to top when new products are added
+  // Restore the last scroll position on mount (e.g. returning from a seller
+  // profile) and keep it saved as the user scrolls. Runs before paint so there's
+  // no visible jump back to the top.
+  useLayoutEffect(() => {
+    const el = feedRef.current;
+    if (!el) return;
+    const saved = sessionStorage.getItem(key);
+    if (saved) el.scrollTop = Number(saved);
+    const onScroll = () => sessionStorage.setItem(key, String(el.scrollTop));
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [key]);
+
+  // Auto-scroll to top only when NEW products arrive (not on remount)
   useEffect(() => {
     if (products.length > previousProductCountRef.current && feedRef.current) {
       feedRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      sessionStorage.setItem(key, "0");
     }
     previousProductCountRef.current = products.length;
-  }, [products.length]);
+  }, [products.length, key]);
 
   return (
     <div
@@ -114,11 +130,32 @@ function NoProductsState() {
   );
 }
 
+function FollowingEmptyState() {
+  return (
+    <div
+      data-testid="following-empty-state"
+      className="h-full w-full flex flex-col items-center justify-center bg-black text-white p-6"
+    >
+      <div className="w-24 h-24 rounded-full bg-white/10 flex items-center justify-center mb-6">
+        <UserPlus className="w-10 h-10 text-white/50" />
+      </div>
+      <h2 className="text-xl font-bold mb-2">Your Following feed is empty</h2>
+      <p className="text-white/70 text-center">
+        Follow shops you love and their latest products will show up here.
+      </p>
+    </div>
+  );
+}
+
+type FeedMode = "forYou" | "following";
+
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<ProductCategory | null>(null);
+  const [feedMode, setFeedMode] = useState<FeedMode>("forYou");
   const { count: favoritesCount } = useFavorites();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
+  const followUserId = user?.id ? String(user.id) : getGuestId();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Show auth modal if user is not logged in and auth check is done
@@ -132,19 +169,22 @@ export default function Home() {
 
   // Realtime updates come from the app-level subscription (use-realtime-sync);
   // the slow poll is only a fallback in case the websocket drops.
-  const {
-    data: products,
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery<Product[]>({
+  const forYouQuery = useQuery<Product[]>({
     queryKey: ["/api/products"],
     refetchInterval: 60_000,
   });
 
+  const followingQuery = useQuery<Product[]>({
+    queryKey: ["/api/feed/following", followUserId],
+    enabled: feedMode === "following",
+  });
+
+  const { data: products, isLoading, isError, refetch } =
+    feedMode === "following" ? followingQuery : forYouQuery;
+
   const filteredProducts = useMemo(() => {
     if (!products) return [];
-    
+
     return products.filter((product) => {
       const matchesSearch = searchQuery === "" || 
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -165,11 +205,11 @@ export default function Home() {
   } else if (isError) {
     content = <ErrorState onRetry={() => refetch()} />;
   } else if (!products || products.length === 0) {
-    content = <NoProductsState />;
+    content = feedMode === "following" ? <FollowingEmptyState /> : <NoProductsState />;
   } else if (filteredProducts.length === 0) {
     content = <EmptyState />;
   } else {
-    content = <FeedContent products={filteredProducts} />;
+    content = <FeedContent products={filteredProducts} storageKey={feedMode} />;
   }
 
   return (
@@ -245,8 +285,34 @@ export default function Home() {
               ) : null}
             </div>
             
-            <CategoryFilter 
-              selected={selectedCategory} 
+            {/* For You / Following toggle */}
+            <div className="flex items-center justify-center gap-6">
+              <button
+                data-testid="tab-for-you"
+                onClick={() => setFeedMode("forYou")}
+                className={`text-sm font-bold pb-1 border-b-2 transition-colors ${
+                  feedMode === "forYou"
+                    ? "text-white border-white"
+                    : "text-white/50 border-transparent hover:text-white/80"
+                }`}
+              >
+                For You
+              </button>
+              <button
+                data-testid="tab-following"
+                onClick={() => setFeedMode("following")}
+                className={`text-sm font-bold pb-1 border-b-2 transition-colors ${
+                  feedMode === "following"
+                    ? "text-white border-white"
+                    : "text-white/50 border-transparent hover:text-white/80"
+                }`}
+              >
+                Following
+              </button>
+            </div>
+
+            <CategoryFilter
+              selected={selectedCategory}
               onSelect={setSelectedCategory}
             />
 

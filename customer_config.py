@@ -32,6 +32,9 @@ ENCOURAGE_WHATSAPP_CONTACT = True
 FLUTTERWAVE_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY", "")
 FLUTTERWAVE_PUBLIC_KEY = os.getenv("FLUTTERWAVE_PUBLIC_KEY", "")
 FLUTTERWAVE_BASE_URL = "https://api.flutterwave.com/v3"
+# Secret hash you set in the Flutterwave dashboard webhook settings. Incoming
+# webhooks must send it in the "verif-hash" header or they're rejected.
+FLUTTERWAVE_SECRET_HASH = os.getenv("FLUTTERWAVE_SECRET_HASH", "")
 
 # Twilio (shared with the seller bot). WHATSAPP_FROM is the sender number in
 # Twilio's "whatsapp:+14155238886" format; defaults to the public sandbox.

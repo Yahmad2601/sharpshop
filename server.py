@@ -34,9 +34,21 @@ allowed_origins = [
     "http://0.0.0.0:8001"
 ]
 
+# Also allow localhost and private-LAN origins on any port so a phone/laptop on
+# the same network can reach the dev backend (e.g. http://192.168.1.10:5000).
+LOCAL_ORIGIN_REGEX = (
+    r"https?://("
+    r"localhost|127\.0\.0\.1"
+    r"|10(?:\.\d{1,3}){3}"
+    r"|192\.168(?:\.\d{1,3}){2}"
+    r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}"
+    r")(?::\d+)?"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=LOCAL_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -142,10 +154,15 @@ async def whatsapp_webhook(request: Request):
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
+from fastapi import Depends
 from customer_sessions import create_session, get_session, update_session, cleanup_expired_sessions
 from customer_agent import handle_customer_chat
 from customer_tools import get_shop_info
-from customer_config import CLEANUP_INTERVAL
+from customer_config import CLEANUP_INTERVAL, RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_HOUR
+from rate_limit import RateLimiter
+
+# Per-IP limiter for the customer-facing endpoints (LLM/token cost protection)
+customer_rate_limiter = RateLimiter(RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_HOUR)
 
 @app.on_event("startup")
 async def start_session_cleanup():
@@ -182,7 +199,7 @@ class NewSessionResponse(BaseModel):
     created_at: str
 
 @app.post("/api/chat/customer", response_model=CustomerChatResponse)
-async def customer_chat(request: CustomerChatRequest):
+async def customer_chat(request: CustomerChatRequest, _rl: None = Depends(customer_rate_limiter)):
     """Handle customer chat messages via web interface."""
     
     # 1. Get or create session
@@ -227,7 +244,7 @@ async def customer_chat(request: CustomerChatRequest):
     )
 
 @app.post("/api/chat/customer/session/new", response_model=NewSessionResponse)
-async def create_new_customer_session(request: NewSessionRequest):
+async def create_new_customer_session(request: NewSessionRequest, _rl: None = Depends(customer_rate_limiter)):
     """Explicitly create a new session."""
     shop_info = await run_in_threadpool(get_shop_info, request.trader_id)
     if not shop_info:
@@ -300,7 +317,7 @@ class CheckoutResponse(BaseModel):
     redirect_url: str
 
 @app.post("/api/checkout", response_model=CheckoutResponse)
-async def create_checkout(request: CheckoutRequest):
+async def create_checkout(request: CheckoutRequest, _rl: None = Depends(customer_rate_limiter)):
     """Create an order and return Flutterwave inline checkout config."""
     from customer_tools import create_order, get_product_details
     from customer_config import FLUTTERWAVE_PUBLIC_KEY
@@ -348,6 +365,54 @@ async def verify_payment(order_id: str):
     """
     from customer_tools import check_order_status
     status = await run_in_threadpool(check_order_status, order_id)
+    return {"order_id": order_id, "status": status}
+
+
+def _order_id_from_tx_ref(tx_ref: str) -> Optional[str]:
+    """Our tx_ref format is 'sharpshop_{order_id}'."""
+    if tx_ref and tx_ref.startswith("sharpshop_"):
+        return tx_ref[len("sharpshop_"):]
+    return None
+
+
+@app.post("/api/webhook/flutterwave")
+async def flutterwave_webhook(request: Request):
+    """Server-to-server payment confirmation from Flutterwave.
+
+    The webhook is only a *trigger*: we authenticate it via the verif-hash
+    header, then re-verify the transaction through check_order_status (which
+    re-queries Flutterwave and checks amount/currency/tx_ref) rather than
+    trusting the webhook body. This makes confirmation reliable even if the
+    customer closes the browser before the redirect.
+    """
+    from customer_config import FLUTTERWAVE_SECRET_HASH
+    from customer_tools import check_order_status
+
+    # 1. Authenticate the webhook
+    signature = request.headers.get("verif-hash", "")
+    if not FLUTTERWAVE_SECRET_HASH:
+        logging.warning("FLUTTERWAVE_SECRET_HASH not set — rejecting webhook")
+        return Response(status_code=401)
+    if signature != FLUTTERWAVE_SECRET_HASH:
+        logging.warning("Rejected Flutterwave webhook with invalid verif-hash")
+        return Response(status_code=401)
+
+    # 2. Pull the tx_ref out of the payload
+    try:
+        payload = await request.json()
+    except Exception:
+        return Response(status_code=400)
+
+    data = payload.get("data") or {}
+    tx_ref = data.get("tx_ref") or data.get("txRef") or ""
+    order_id = _order_id_from_tx_ref(tx_ref)
+    if not order_id:
+        logging.info(f"Flutterwave webhook ignored (no sharpshop tx_ref): {tx_ref!r}")
+        return Response(status_code=200)  # 200 so Flutterwave doesn't retry
+
+    # 3. Re-verify and persist (never trust the webhook body for the decision)
+    status = await run_in_threadpool(check_order_status, order_id)
+    logging.info(f"Flutterwave webhook: order {order_id} -> {status}")
     return {"order_id": order_id, "status": status}
 
 if __name__ == "__main__":

@@ -1,6 +1,22 @@
 DATABASE SETUP INSTRUCTIONS
 ===========================
 
+DEPLOYMENT / ENV NOTES
+----------------------
+- Express login sessions are now Postgres-backed via connect-pg-simple when
+  DATABASE_URL is set (see the frontend .env). The "session" table is created
+  automatically on first boot. Without DATABASE_URL it falls back to in-memory
+  (logins reset on restart). Set DATABASE_URL in production.
+- Flutterwave webhook: set FLUTTERWAVE_SECRET_HASH (root .env) to any secret,
+  paste the same value into the Flutterwave dashboard webhook settings, and
+  point the webhook URL at  https://<python-backend>/api/webhook/flutterwave
+- KNOWN LIMITATION (not yet done): the Python customer-chat sessions
+  (customer_sessions.py) and WhatsApp seller sessions (server.py user_sessions)
+  are still in-memory dicts. They survive within one running process but reset
+  on restart and do NOT share across multiple Python dynos. Single-dyno
+  deployments are unaffected; move these to Redis/Postgres before scaling the
+  Python backend horizontally.
+
 To enable the Payment and Fulfillment flow for the Customer Agent, the following database changes are required in Supabase.
 
 Please execute the following SQL script in the Supabase SQL Editor:

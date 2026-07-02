@@ -22,9 +22,22 @@ export function useRealtimeSync() {
         "postgres_changes",
         { event: "*", schema: "public", table: "products" },
         () => {
-          // Covers ["/api/products"] and ["/api/products/trader", id]
+          // Covers ["/api/products"], ["/api/products/trader", id], and the following feed
           queryClient.invalidateQueries({
-            predicate: (q) => String(q.queryKey[0]).startsWith("/api/products"),
+            predicate: (q) => {
+              const key = String(q.queryKey[0]);
+              return key.startsWith("/api/products") || key.startsWith("/api/feed");
+            },
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "follows" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["follows"] });
+          queryClient.invalidateQueries({
+            predicate: (q) => String(q.queryKey[0]).startsWith("/api/feed"),
           });
         }
       )

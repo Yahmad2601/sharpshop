@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ShoppingBag, Share2, MessageCircle } from "lucide-react";
+import { shareLink } from "@/lib/share";
+import { useToast } from "@/hooks/use-toast";
 
 interface ActionButtonsProps {
   productName: string;
@@ -18,21 +20,17 @@ export function ActionButtons({
   onBuyClick,
   onChatClick,
 }: ActionButtonsProps) {
+  const { toast } = useToast();
+
   const handleShare = async () => {
-    const shareData = {
+    const result = await shareLink(productUrl || window.location.href, {
       title: productName,
       text: `Check out ${productName} on SharpShop!`,
-      url: productUrl || window.location.href,
-    };
-
-    try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-      } else {
-        await navigator.clipboard.writeText(shareData.url);
-      }
-    } catch (err) {
-      console.log("Share failed:", err);
+    });
+    if (result === "copied") {
+      toast({ title: "Link copied!", description: "Product link copied to clipboard." });
+    } else if (result === "failed") {
+      toast({ title: "Couldn't share", description: "Please copy the link from your address bar.", variant: "destructive" });
     }
   };
 

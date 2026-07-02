@@ -3,8 +3,57 @@ import { randomUUID } from "crypto";
 import { supabase } from "./supabase";
 import session from "express-session";
 import createMemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
+import pg from "pg";
 
 const MemoryStore = createMemoryStore(session);
+
+function createMemorySessionStore(): session.Store {
+  return new MemoryStore({ checkPeriod: 86400000 });
+}
+
+// Upgrade the session store to Postgres if DATABASE_URL is reachable. Called
+// once at startup (before auth is wired). Deliberately fails soft: any
+// connection problem falls back to the in-memory store so a bad DATABASE_URL
+// can't take down login/signup entirely — it just costs session persistence.
+export async function initSessionStore(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.warn(
+      "DATABASE_URL not set — using in-memory session store. Logins reset on restart and won't work across multiple instances."
+    );
+    return;
+  }
+
+  const pool = new pg.Pool({
+    connectionString: databaseUrl,
+    // Supabase requires TLS; the pooler cert isn't in Node's default CA bundle
+    ssl: { rejectUnauthorized: false },
+    max: 3,
+    connectionTimeoutMillis: 8000,
+  });
+  pool.on("error", (err) => console.error("Session pool error:", err));
+
+  try {
+    await pool.query("select 1");
+  } catch (e: any) {
+    console.error(
+      `⚠️  Postgres session store connection failed: ${e.message}\n` +
+      `    Falling back to in-memory sessions (logins won't persist across restarts).\n` +
+      `    Check DATABASE_URL in your .env — most often a wrong database password or host.`
+    );
+    await pool.end().catch(() => {});
+    return;
+  }
+
+  const PgStore = connectPgSimple(session);
+  storage.sessionStore = new PgStore({
+    pool,
+    tableName: "session",
+    createTableIfMissing: true,
+  });
+  console.log("Session store: Postgres (persistent).");
+}
 
 export interface IStorage {
   sessionStore: session.Store;
@@ -57,6 +106,7 @@ export interface IStorage {
   createFollow(follow: InsertFollow): Promise<Follow>;
   deleteFollow(traderId: string, userId: string): Promise<boolean>;
   getFollowedTraderIds(userId: string): Promise<string[]>;
+  getProductsFromFollowedTraders(userId: string): Promise<Product[]>;
 
   // Guest -> account data migration on login
   mergeGuestData(guestId: string, userId: string, userName: string): Promise<void>;
@@ -199,9 +249,8 @@ export class SupabaseStorage implements IStorage {
   sessionStore: session.Store;
 
   constructor() {
-    this.sessionStore = new MemoryStore({
-      checkPeriod: 86400000,
-    });
+    // Defaults to in-memory; upgraded to Postgres by initSessionStore() at startup.
+    this.sessionStore = createMemorySessionStore();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -689,6 +738,24 @@ export class SupabaseStorage implements IStorage {
     return (data || []).map((row) => row.trader_id);
   }
 
+  async getProductsFromFollowedTraders(userId: string): Promise<Product[]> {
+    const traderIds = await this.getFollowedTraderIds(userId);
+    if (traderIds.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .in('trader_id', traderIds)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching following feed:', error);
+      return [];
+    }
+    return data ? data.map(toCamelCase) : [];
+  }
+
   async mergeGuestData(guestId: string, userId: string, userName: string): Promise<void> {
     // Reassign guest rows to the account; where the account already has the
     // same product (unique constraint), drop the guest duplicate instead.
@@ -740,9 +807,7 @@ export class MemStorage implements IStorage {
   sessionStore: session.Store;
 
   constructor() {
-    this.sessionStore = new MemoryStore({
-      checkPeriod: 86400000,
-    });
+    this.sessionStore = createMemorySessionStore();
     this.users = new Map();
     this.traders = new Map();
     this.products = new Map();
@@ -977,13 +1042,20 @@ export class MemStorage implements IStorage {
     return [];
   }
 
+  async getProductsFromFollowedTraders(userId: string): Promise<Product[]> {
+    return [];
+  }
+
   async mergeGuestData(guestId: string, userId: string, userName: string): Promise<void> {
     // No-op: MemStorage doesn't persist likes/favorites/comments/follows
   }
 }
 
 // Use Supabase storage if credentials are available, otherwise use in-memory storage
-const USE_SUPABASE = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) && (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY);
+// Tests always use in-memory storage so they never touch the real database.
+const USE_SUPABASE = process.env.NODE_ENV !== "test" &&
+  (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) &&
+  (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY);
 
 console.log('Storage backend:', USE_SUPABASE ? 'Supabase' : 'In-Memory');
 if (USE_SUPABASE) {
