@@ -16,6 +16,8 @@ from tools import create_product, query_inventory, update_product, list_products
 
 REQUIRED_FIELDS = ["name", "price", "category", "stock"]
 OPTIONAL_FIELDS = ["description", "image"]
+# Keys the LLM may pass through to create_product(**data)
+CREATE_PRODUCT_FIELDS = {"name", "price", "category", "stock", "description"}
 
 
 def normalize_naira_price(value) -> int | None:
@@ -220,6 +222,30 @@ def execute_action(state: AgentState) -> AgentState:
     result_msg = ""
     
     if action == "create_product":
+        # The LLM sometimes emits extra keys (brand, size, ...) that create_product
+        # doesn't accept — keep only known fields so **data can't TypeError.
+        data = {k: v for k, v in data.items() if k in CREATE_PRODUCT_FIELDS}
+
+        # Normalize price ("5k", "₦12k", "250") into integer Naira
+        price = normalize_naira_price(data.get("price"))
+        if price is not None:
+            data["price"] = price
+
+        missing = [f for f in ("name", "price") if not data.get(f)]
+        if missing:
+            result_msg = f"I still need the product {' and '.join(missing)} to create the listing. Please send it."
+            new_state = state.copy()
+            new_state["messages"] = state["messages"] + [{"role": "assistant", "content": result_msg}]
+            new_state["collected_data"] = data  # keep what we have so far
+            return new_state
+
+        try:
+            data["stock"] = int(data.get("stock", 1))
+        except (TypeError, ValueError):
+            data["stock"] = 1
+        if data.get("category") not in ALLOWED_CATEGORIES:
+            data["category"] = "Fashion"
+
         # Check if image is provided - REQUIRE image for product creation
         if not state["image_url"]:
             result_msg = "📸 Please send a photo of your product! I need an image to create the listing.\n\nJust send the photo and I'll add it to your product."
@@ -228,7 +254,7 @@ def execute_action(state: AgentState) -> AgentState:
             new_state["messages"] = state["messages"] + [{"role": "assistant", "content": result_msg}]
             # Don't clear pending_action or collected_data - we're waiting for image
             return new_state
-        
+
         # Add trader info and image
         data["trader_id"] = state["trader_id"]
         data["trader_name"] = state["trader_name"]
@@ -269,7 +295,13 @@ def execute_action(state: AgentState) -> AgentState:
                 # Normalize field names: "stock" -> "stock_quantity"
                 if "stock" in updates:
                     updates["stock_quantity"] = updates.pop("stock")
-                
+
+                # Normalize price shorthand ("18k") into integer Naira
+                if "price" in updates:
+                    normalized_price = normalize_naira_price(updates["price"])
+                    if normalized_price is not None:
+                        updates["price"] = normalized_price
+
                 result = update_product(product_id, updates, state["trader_id"])
                 
                 if result["success"]:
@@ -287,6 +319,9 @@ def execute_action(state: AgentState) -> AgentState:
         else:
             result_msg = "You haven't added any products yet."
     
+    if not result_msg:
+        result_msg = "Sorry, I couldn't process that. You can add a product, list your products, check stock, or update a product."
+
     new_state = state.copy()
     new_state["messages"] = state["messages"] + [{"role": "assistant", "content": result_msg}]
     new_state["pending_action"] = None
@@ -297,7 +332,9 @@ def execute_action(state: AgentState) -> AgentState:
 
 def should_execute(state: AgentState) -> Literal["execute", "end"]:
     """Determine if we should execute an action or end."""
-    if state["pending_action"] and state["collected_data"]:
+    # Note: don't require collected_data to be non-empty — list_products
+    # legitimately arrives with data == {}.
+    if state["pending_action"]:
         return "execute"
     return "end"
 
@@ -313,9 +350,19 @@ def build_graph() -> StateGraph:
     return graph.compile()
 
 
-def create_initial_state(whatsapp_number: str, business_name: str = "My Shop") -> AgentState:
-    """Create initial state for a new conversation."""
-    trader = get_trader_by_whatsapp(whatsapp_number)
+# Compile once at import time; recompiling per message is pure overhead
+_GRAPH = build_graph()
+
+
+def create_initial_state(whatsapp_number: str, business_name: str = "My Shop",
+                         trader: dict | None = None) -> AgentState:
+    """Create initial state for a new conversation.
+
+    Pass `trader` if already fetched (the webhook looks it up first) to avoid
+    a duplicate round of DB lookups.
+    """
+    if trader is None:
+        trader = get_trader_by_whatsapp(whatsapp_number)
     if not trader:
         raise ValueError(f"No registered trader found for {whatsapp_number}")
     return {
@@ -335,6 +382,5 @@ def chat(state: AgentState, user_message: str, image_url: str = None) -> AgentSt
     new_state["messages"] = state["messages"] + [{"role": "user", "content": user_message}]
     if image_url:
         new_state["image_url"] = image_url
-    
-    graph = build_graph()
-    return graph.invoke(new_state)
+
+    return _GRAPH.invoke(new_state)

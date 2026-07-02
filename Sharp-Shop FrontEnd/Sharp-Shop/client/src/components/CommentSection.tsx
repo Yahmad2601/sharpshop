@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
-import { Heart, Send, X } from "lucide-react";
+import { useState } from "react";
+import { Send } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Drawer,
-  DrawerClose,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
@@ -15,7 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/lib/supabase";
+import { getGuestId, getGuestName } from "@/lib/guest";
 
 interface Comment {
   id: string;
@@ -30,25 +29,17 @@ interface Comment {
 
 const EMOJIS = ["❤️", "😍", "😂", "😭", "🔥", "🙏", "😊"];
 
-// Generate a consistent guest ID from browser fingerprint or localStorage
-const getGuestId = () => {
-  let userId = localStorage.getItem('sharpshop_guest_id');
-  if (!userId) {
-    userId = 'guest_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('sharpshop_guest_id', userId);
+// Postgres text timestamps ("2026-07-01 12:34:56") aren't parseable by
+// new Date() in all browsers; normalize and never let a bad date crash the UI.
+function formatCommentTime(raw: string): string {
+  if (!raw) return "";
+  let date = new Date(raw);
+  if (isNaN(date.getTime())) {
+    date = new Date(raw.replace(" ", "T") + "Z");
   }
-  return userId;
-};
-
-const getGuestName = () => {
-  let userName = localStorage.getItem('sharpshop_guest_name');
-  if (!userName) {
-    const names = ['Chioma', 'Emeka', 'Fatima', 'Tunde', 'Ngozi', 'Ade', 'Kemi', 'Chidi'];
-    userName = names[Math.floor(Math.random() * names.length)];
-    localStorage.setItem('sharpshop_guest_name', userName);
-  }
-  return userName;
-};
+  if (isNaN(date.getTime())) return "";
+  return formatDistanceToNow(date, { addSuffix: true });
+}
 
 interface CommentSectionProps {
   children?: React.ReactNode;
@@ -57,37 +48,27 @@ interface CommentSectionProps {
 }
 
 export function CommentSection({ children, trigger, productId }: CommentSectionProps) {
+  const [open, setOpen] = useState(false);
   const [newComment, setNewComment] = useState("");
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  
+
   const userId = user?.id || getGuestId();
   const userName = user?.username || getGuestName();
 
-  // Set up real-time subscription for comments on this product
-  useEffect(() => {
-    const channel = supabase
-      .channel(`comments-${productId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'comments',
-          filter: `product_id=eq.${productId}`
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['comments', productId] });
-        }
-      )
-      .subscribe();
+  // One shared request serves every card's comment-count badge.
+  // Realtime invalidation is handled centrally in use-realtime-sync.
+  const { data: counts = {} } = useQuery<Record<string, number>>({
+    queryKey: ["comments", "counts"],
+    queryFn: async () => {
+      const res = await fetch("/api/comments/counts");
+      if (!res.ok) return {};
+      return res.json();
+    },
+  });
+  const commentCount = counts[productId] ?? 0;
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [productId, queryClient]);
-
-  // Fetch comments from API
+  // Full comment list is only fetched when the drawer is actually opened
   const { data: comments = [], isLoading } = useQuery({
     queryKey: ['comments', productId],
     queryFn: async () => {
@@ -95,6 +76,7 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
       if (!res.ok) throw new Error('Failed to fetch comments');
       return res.json() as Promise<Comment[]>;
     },
+    enabled: open,
   });
 
   // Add comment mutation
@@ -116,6 +98,7 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['comments', productId] });
+      queryClient.invalidateQueries({ queryKey: ['comments', 'counts'] });
       setNewComment("");
     },
   });
@@ -126,8 +109,8 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
   };
 
   return (
-    <Drawer>
-      <DrawerTrigger asChild>{trigger ? trigger(comments.length) : children}</DrawerTrigger>
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>{trigger ? trigger(commentCount) : children}</DrawerTrigger>
       <DrawerContent className="h-[75vh] bg-[#121212] border-t border-white/10 text-white">
         <DrawerHeader className="border-b border-white/10 pb-4 pt-2">
           <div className="flex items-center justify-center">
@@ -158,7 +141,7 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
                         {comment.userName}
                       </span>
                       <span className="text-[10px] text-white/50">
-                        {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
+                        {formatCommentTime(comment.createdAt)}
                       </span>
                     </div>
                     <p className="text-sm text-white/90 leading-snug">

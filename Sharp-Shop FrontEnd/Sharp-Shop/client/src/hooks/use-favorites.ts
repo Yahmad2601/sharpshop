@@ -1,16 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-
-// Generate a consistent guest ID from localStorage
-const getGuestId = () => {
-  let userId = localStorage.getItem('sharpshop_guest_id');
-  if (!userId) {
-    userId = 'guest_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('sharpshop_guest_id', userId);
-  }
-  return userId;
-};
+import { getGuestId } from "@/lib/guest";
 
 // Migrate old localStorage favorites to database
 const migrateLocalStorageFavorites = async (userId: string) => {

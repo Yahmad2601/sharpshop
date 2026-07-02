@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { type Product, type ProductCategory } from "@shared/schema";
 import { ProductCard } from "@/components/ProductCard";
@@ -9,7 +9,6 @@ import { CategoryFilter } from "@/components/CategoryFilter";
 import { AuthModal } from "@/components/AuthModal";
 import { useFavorites } from "@/hooks/use-favorites";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/lib/supabase";
 import { AlertCircle, RefreshCw, Search, Heart, User, LogOut, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -121,7 +120,6 @@ export default function Home() {
   const { count: favoritesCount } = useFavorites();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const queryClient = useQueryClient();
 
   // Show auth modal if user is not logged in and auth check is done
   useEffect(() => {
@@ -132,6 +130,8 @@ export default function Home() {
     }
   }, [isAuthLoading, user]);
 
+  // Realtime updates come from the app-level subscription (use-realtime-sync);
+  // the slow poll is only a fallback in case the websocket drops.
   const {
     data: products,
     isLoading,
@@ -139,36 +139,8 @@ export default function Home() {
     refetch,
   } = useQuery<Product[]>({
     queryKey: ["/api/products"],
-    refetchInterval: 5000, // Poll every 5 seconds as fallback
+    refetchInterval: 60_000,
   });
-
-  // Set up real-time subscription for products
-  useEffect(() => {
-    console.log('Setting up real-time subscription for products...');
-    
-    const channel = supabase
-      .channel('products-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'products'
-        },
-        (payload) => {
-          console.log('Real-time update received:', payload);
-          // Invalidate and refetch products when any change occurs
-          queryClient.invalidateQueries({ queryKey: ['/api/products'] });
-        }
-      )
-      .subscribe((status) => {
-        console.log('Subscription status:', status);
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
 
   const filteredProducts = useMemo(() => {
     if (!products) return [];

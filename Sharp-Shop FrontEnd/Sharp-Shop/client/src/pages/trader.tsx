@@ -1,44 +1,29 @@
 import { useQuery } from "@tanstack/react-query";
 import { type Product, type Trader } from "@shared/schema";
 import { ProductSkeleton } from "@/components/ProductSkeleton";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   ArrowLeft,
   MapPin,
   Mail,
   MoreHorizontal,
   Share2,
-  ChevronDown,
   Star,
   UserPlus,
   AlertCircle,
   RefreshCw,
-  X,
-  Eye,
   Phone
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useParams, useLocation } from "wouter";
-import { motion, AnimatePresence } from "framer-motion";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useState } from "react";
+import { motion } from "framer-motion";
 import { CustomerChat } from "@/components/CustomerChat";
-
-const SUGGESTED_TRADERS = [
-  { id: "trader_001", name: "SneakerHub NG", category: "Footwear" },
-  { id: "trader_002", name: "VintageVibes Lagos", category: "Fashion" },
-  { id: "trader_003", name: "LuxeAccessories", category: "Accessories" },
-  { id: "trader_004", name: "TimePiece Gallery", category: "Watches" },
-];
 
 export default function TraderProfile() {
   const [, setLocation] = useLocation();
   const params = useParams<{ traderId: string }>();
-  const [isExpanded, setIsExpanded] = useState(false);
   const traderId = params.traderId;
-  const { user } = useAuth();
 
   const {
     data: trader,
@@ -64,7 +49,6 @@ export default function TraderProfile() {
   const bio = trader?.bio || "Quality products at affordable prices. 🇳🇬";
   const location = trader?.address || "Nigeria";
   const whatsapp = trader?.whatsappNumber;
-  const followers = "158.5K"; // TODO: Implement follower count
 
   if (isLoading || traderLoading) {
     return (
@@ -167,7 +151,7 @@ export default function TraderProfile() {
                 </div>
               </div>
               <p className="text-xs text-white/60 line-clamp-1">
-                {username} • {followers}
+                {username}
               </p>
             </div>
           </div>
@@ -187,65 +171,7 @@ export default function TraderProfile() {
               <UserPlus className="w-5 h-5 mr-2" />
               Follow
             </Button>
-
-            <Button
-              size="icon"
-              variant="secondary"
-              className={`h-10 w-10 rounded-full bg-white/10 border-none text-white hover:bg-white/20 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
-              onClick={() => setIsExpanded(!isExpanded)}
-            >
-              <ChevronDown className="w-6 h-6" />
-            </Button>
           </div>
-
-          {/* Expansion Content */}
-          <AnimatePresence>
-            {isExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="overflow-hidden mb-4"
-              >
-                <div className="py-2">
-                  <p className="text-base font-semibold text-white mb-3 px-1">Recommended Accounts</p>
-                  <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
-                    {SUGGESTED_TRADERS.filter(t => t.id !== traderId).map((trader) => (
-                      <div
-                        key={trader.id}
-                        className="flex flex-col items-center p-4 rounded-2xl bg-[#1E1E1E] min-w-[140px] w-[140px] relative shrink-0"
-                      >
-                        <button className="absolute top-2 right-2 text-white/40 hover:text-white">
-                          <X className="w-4 h-4" />
-                        </button>
-
-                        <div className="relative mb-3 mt-2">
-                          <Avatar className="h-16 w-16 border-none">
-                            <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${trader.name}`} />
-                            <AvatarFallback>{trader.name[0]}</AvatarFallback>
-                          </Avatar>
-                          <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-[#1E1E1E]" />
-                        </div>
-
-                        <h3 className="font-semibold text-white text-sm text-center truncate w-full mb-1">{trader.name}</h3>
-                        <p className="text-[10px] text-white/50 text-center mb-4">{trader.category}</p>
-
-                        <Button
-                          size="sm"
-                          className="w-full h-8 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-medium gap-1.5"
-                          onClick={() => setLocation(`/trader/${trader.id}`)}
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          View
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* Info Buttons */}
           <div className="flex gap-3 mb-4 overflow-x-auto scrollbar-hide">

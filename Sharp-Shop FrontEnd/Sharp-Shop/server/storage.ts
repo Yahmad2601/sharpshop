@@ -12,6 +12,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  deleteUser(id: string): Promise<boolean>;
   
   createTrader(trader: InsertTrader): Promise<Trader>;
   getTrader(id: string): Promise<Trader | undefined>;
@@ -24,21 +25,28 @@ export interface IStorage {
   updateProductStock(id: string, quantity: number): Promise<Product | undefined>;
   
   // Comments
+  getComment(id: string): Promise<Comment | undefined>;
   getCommentsByProduct(productId: string): Promise<Comment[]>;
+  getCommentCounts(): Promise<Record<string, number>>;
   createComment(comment: InsertComment): Promise<Comment>;
   deleteComment(id: string): Promise<boolean>;
-  
+
   // Favorites
   getFavoritesByUser(userId: string): Promise<Favorite[]>;
   createFavorite(favorite: InsertFavorite): Promise<Favorite>;
   deleteFavorite(productId: string, userId: string): Promise<boolean>;
   isFavorite(productId: string, userId: string): Promise<boolean>;
-  
+
   // Likes
   getLikeCount(productId: string): Promise<number>;
+  getLikeCounts(): Promise<Record<string, number>>;
+  getLikedProductIds(userId: string): Promise<string[]>;
   isLiked(productId: string, userId: string): Promise<boolean>;
   createLike(like: InsertLike): Promise<Like>;
   deleteLike(productId: string, userId: string): Promise<boolean>;
+
+  // Guest -> account data migration on login
+  mergeGuestData(guestId: string, userId: string, userName: string): Promise<void>;
 }
 
 // Helper function to convert Supabase snake_case to camelCase
@@ -247,6 +255,15 @@ export class SupabaseStorage implements IStorage {
     return toCamelCase(data);
   }
 
+  async deleteUser(id: string): Promise<boolean> {
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id);
+
+    return !error;
+  }
+
   async createTrader(insertTrader: InsertTrader): Promise<Trader> {
     const id = randomUUID();
     const { data, error } = await supabase
@@ -356,6 +373,17 @@ export class SupabaseStorage implements IStorage {
   }
 
   // Comments methods
+  async getComment(id: string): Promise<Comment | undefined> {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) return undefined;
+    return toCamelCase(data);
+  }
+
   async getCommentsByProduct(productId: string): Promise<Comment[]> {
     const { data, error } = await supabase
       .from('comments')
@@ -382,12 +410,29 @@ export class SupabaseStorage implements IStorage {
     return toCamelCase(data);
   }
 
+  async getCommentCounts(): Promise<Record<string, number>> {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('product_id');
+
+    if (error) {
+      console.error('Error fetching comment counts:', error);
+      return {};
+    }
+
+    const counts: Record<string, number> = {};
+    for (const row of data || []) {
+      counts[row.product_id] = (counts[row.product_id] || 0) + 1;
+    }
+    return counts;
+  }
+
   async deleteComment(id: string): Promise<boolean> {
     const { error } = await supabase
       .from('comments')
       .delete()
       .eq('id', id);
-    
+
     return !error;
   }
 
@@ -453,6 +498,36 @@ export class SupabaseStorage implements IStorage {
     return count || 0;
   }
 
+  async getLikeCounts(): Promise<Record<string, number>> {
+    const { data, error } = await supabase
+      .from('likes')
+      .select('product_id');
+
+    if (error) {
+      console.error('Error fetching like counts:', error);
+      return {};
+    }
+
+    const counts: Record<string, number> = {};
+    for (const row of data || []) {
+      counts[row.product_id] = (counts[row.product_id] || 0) + 1;
+    }
+    return counts;
+  }
+
+  async getLikedProductIds(userId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('likes')
+      .select('product_id')
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error fetching liked products:', error);
+      return [];
+    }
+    return (data || []).map((row) => row.product_id);
+  }
+
   async isLiked(productId: string, userId: string): Promise<boolean> {
     const { data, error } = await supabase
       .from('likes')
@@ -460,7 +535,7 @@ export class SupabaseStorage implements IStorage {
       .eq('product_id', productId)
       .eq('user_id', userId)
       .single();
-    
+
     return !!data && !error;
   }
 
@@ -481,8 +556,39 @@ export class SupabaseStorage implements IStorage {
       .delete()
       .eq('product_id', productId)
       .eq('user_id', userId);
-    
+
     return !error;
+  }
+
+  async mergeGuestData(guestId: string, userId: string, userName: string): Promise<void> {
+    // Reassign guest rows to the account; where the account already has the
+    // same product (unique constraint), drop the guest duplicate instead.
+    const guestFavorites = await this.getFavoritesByUser(guestId);
+    for (const fav of guestFavorites) {
+      if (await this.isFavorite(fav.productId, userId)) {
+        await supabase.from('favorites').delete().eq('id', fav.id);
+      } else {
+        await supabase.from('favorites').update({ user_id: userId }).eq('id', fav.id);
+      }
+    }
+
+    const { data: guestLikes } = await supabase
+      .from('likes')
+      .select('id, product_id')
+      .eq('user_id', guestId);
+    for (const like of guestLikes || []) {
+      if (await this.isLiked(like.product_id, userId)) {
+        await supabase.from('likes').delete().eq('id', like.id);
+      } else {
+        await supabase.from('likes').update({ user_id: userId }).eq('id', like.id);
+      }
+    }
+
+    // Comments keep their content but take on the account identity
+    await supabase
+      .from('comments')
+      .update({ user_id: userId, user_name: userName })
+      .eq('user_id', guestId);
   }
 }
 
@@ -534,6 +640,10 @@ export class MemStorage implements IStorage {
     };
     this.users.set(id, user);
     return user;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    return this.users.delete(id);
   }
 
   async createTrader(insertTrader: InsertTrader): Promise<Trader> {
@@ -599,8 +709,16 @@ export class MemStorage implements IStorage {
   }
 
   // Comments methods (in-memory stubs)
+  async getComment(id: string): Promise<Comment | undefined> {
+    return undefined;
+  }
+
   async getCommentsByProduct(productId: string): Promise<Comment[]> {
     return [];
+  }
+
+  async getCommentCounts(): Promise<Record<string, number>> {
+    return {};
   }
 
   async createComment(comment: InsertComment): Promise<Comment> {
@@ -645,6 +763,14 @@ export class MemStorage implements IStorage {
     return 0;
   }
 
+  async getLikeCounts(): Promise<Record<string, number>> {
+    return {};
+  }
+
+  async getLikedProductIds(userId: string): Promise<string[]> {
+    return [];
+  }
+
   async isLiked(productId: string, userId: string): Promise<boolean> {
     return false;
   }
@@ -660,6 +786,10 @@ export class MemStorage implements IStorage {
 
   async deleteLike(productId: string, userId: string): Promise<boolean> {
     return true;
+  }
+
+  async mergeGuestData(guestId: string, userId: string, userName: string): Promise<void> {
+    // No-op: MemStorage doesn't persist likes/favorites/comments
   }
 }
 

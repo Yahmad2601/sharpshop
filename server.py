@@ -1,10 +1,13 @@
 """FastAPI server for WhatsApp chatbot."""
-from fastapi import FastAPI, Form, Request, Response
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.request_validator import RequestValidator
 from agent import create_initial_state, chat
 from database import get_trader_by_whatsapp
 from storage import process_images
+import asyncio
 import uvicorn
 import logging
 import os
@@ -42,29 +45,53 @@ app.add_middleware(
 # In-memory session store
 user_sessions = {}
 
+# Twilio webhook authentication — without this anyone who finds the URL can
+# spoof a seller's number and manage their inventory.
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+_twilio_validator = RequestValidator(TWILIO_AUTH_TOKEN) if TWILIO_AUTH_TOKEN else None
+
+def twilio_request_is_valid(request: Request, form_data) -> bool:
+    if _twilio_validator is None:
+        logging.warning("TWILIO_AUTH_TOKEN not set — skipping webhook signature validation")
+        return True
+    signature = request.headers.get("X-Twilio-Signature", "")
+    url = str(request.url)
+    # Heroku terminates TLS at the router; rebuild the public https URL Twilio signed
+    if request.headers.get("x-forwarded-proto") == "https" and url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    return _twilio_validator.validate(url, dict(form_data), signature)
+
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     """Handle incoming WhatsApp messages."""
     form_data = await request.form()
+
+    if not twilio_request_is_valid(request, form_data):
+        logging.warning("Rejected /whatsapp request with invalid Twilio signature")
+        return Response(content="Invalid signature", status_code=403)
+
     incoming_msg = form_data.get('Body', '').strip()
     sender_id = form_data.get('From', '')
-    
+
     # Check for media (images)
-    num_media = int(form_data.get('NumMedia', 0))
+    try:
+        num_media = int(form_data.get('NumMedia', 0))
+    except (TypeError, ValueError):
+        num_media = 0
     twilio_image_urls = []
     if num_media > 0:
         for i in range(num_media):
             media_url = form_data.get(f'MediaUrl{i}')
             if media_url:
                 twilio_image_urls.append(media_url)
-    
+
     logging.info(f"Received message from {sender_id}: {incoming_msg}")
-    
+
     # Extract WhatsApp number without 'whatsapp:' prefix
     whatsapp_number = sender_id.replace('whatsapp:', '')
-    
-    # Check if this is a registered seller
-    trader = get_trader_by_whatsapp(whatsapp_number)
+
+    # Check if this is a registered seller (threadpool: sync DB call must not block the event loop)
+    trader = await run_in_threadpool(get_trader_by_whatsapp, whatsapp_number)
     
     if trader is None:
         # Not a registered seller - send rejection message
@@ -77,31 +104,31 @@ async def whatsapp_webhook(request: Request):
     permanent_image_urls = []
     if twilio_image_urls:
         logging.info(f"Processing {len(twilio_image_urls)} images...")
-        permanent_image_urls = process_images(twilio_image_urls)
+        permanent_image_urls = await run_in_threadpool(process_images, twilio_image_urls)
         logging.info(f"Uploaded {len(permanent_image_urls)} images to Supabase")
 
-    # Get or create user state
+    # Get or create user state (pass the trader we already fetched — avoids duplicate lookups)
     if sender_id not in user_sessions:
-        user_sessions[sender_id] = create_initial_state(whatsapp_number, trader["business_name"])
-    
+        user_sessions[sender_id] = create_initial_state(whatsapp_number, trader["business_name"], trader=trader)
+
     state = user_sessions[sender_id]
-    
+
     # Add image URL to state if provided
     image_url = permanent_image_urls[0] if permanent_image_urls else None
-    
-    # Process message through agent
+
+    # Process message through agent (threadpool: LLM + DB calls are sync)
     try:
-        new_state = chat(state, incoming_msg, image_url)
+        new_state = await run_in_threadpool(chat, state, incoming_msg, image_url)
         user_sessions[sender_id] = new_state
-        
+
         # Get the last assistant message
         response_text = "Sorry, I didn't understand that."
         for msg in reversed(new_state["messages"]):
             if msg["role"] == "assistant":
                 response_text = msg["content"]
                 break
-    except Exception as e:
-        logging.error(f"Error processing message: {e}")
+    except Exception:
+        logging.exception("Error processing message")
         response_text = "Sorry, I encountered an error processing your request."
 
     # Send response back to Twilio
@@ -118,7 +145,22 @@ from datetime import datetime, timezone
 from customer_sessions import create_session, get_session, update_session, cleanup_expired_sessions
 from customer_agent import handle_customer_chat
 from customer_tools import get_shop_info
-from starlette.concurrency import run_in_threadpool
+from customer_config import CLEANUP_INTERVAL
+
+@app.on_event("startup")
+async def start_session_cleanup():
+    """Periodically evict expired customer sessions (they otherwise only get
+    cleaned lazily on access and can leak until restart)."""
+    async def _loop():
+        while True:
+            await asyncio.sleep(CLEANUP_INTERVAL)
+            try:
+                removed = cleanup_expired_sessions()
+                if removed:
+                    logging.info(f"Cleaned up {removed} expired customer sessions")
+            except Exception:
+                logging.exception("Session cleanup failed")
+    asyncio.create_task(_loop())
 
 class CustomerChatRequest(BaseModel):
     trader_id: str
@@ -147,13 +189,13 @@ async def customer_chat(request: CustomerChatRequest):
     session = None
     if request.session_id:
         session = get_session(request.session_id)
-            
+
     if not session:
         # Check if trader exists
-        shop_info = get_shop_info(request.trader_id)
+        shop_info = await run_in_threadpool(get_shop_info, request.trader_id)
         if not shop_info:
-             return Response(content="Shop not found", status_code=404)
-             
+             raise HTTPException(status_code=404, detail="Shop not found")
+
         session = create_session(request.trader_id, shop_info["business_name"], shop_info["whatsapp_number"])
 
     # 2. Process message
@@ -187,10 +229,10 @@ async def customer_chat(request: CustomerChatRequest):
 @app.post("/api/chat/customer/session/new", response_model=NewSessionResponse)
 async def create_new_customer_session(request: NewSessionRequest):
     """Explicitly create a new session."""
-    shop_info = get_shop_info(request.trader_id)
+    shop_info = await run_in_threadpool(get_shop_info, request.trader_id)
     if not shop_info:
-        return Response(content="Shop not found", status_code=404)
-        
+        raise HTTPException(status_code=404, detail="Shop not found")
+
     session = create_session(request.trader_id, shop_info["business_name"], shop_info["whatsapp_number"])
     
     return NewSessionResponse(
@@ -211,7 +253,7 @@ async def end_customer_session(session_id: str):
 async def get_session_history_endpoint(session_id: str):
     session = get_session(session_id)
     if not session:
-        return Response(content="Session not found", status_code=404)
+        raise HTTPException(status_code=404, detail="Session not found")
         
     return {
         "session_id": session_id,
@@ -227,7 +269,7 @@ async def get_shop_preview(trader_id: str):
     
     shop_info = await run_in_threadpool(get_shop_info, trader_id)
     if not shop_info:
-        return Response(content="Shop not found", status_code=404)
+        raise HTTPException(status_code=404, detail="Shop not found")
         
     products = await run_in_threadpool(get_shop_products, trader_id)
     
@@ -266,15 +308,18 @@ async def create_checkout(request: CheckoutRequest):
     # Get product details for amount
     product = await run_in_threadpool(get_product_details, request.trader_id, request.product_id)
     if not product:
-        return Response(content="Product not found", status_code=404)
-    
-    # Create order in database
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.get("stock_quantity", 0) <= 0:
+        raise HTTPException(status_code=409, detail="Product is out of stock")
+
+    # Create order in database (price already fetched above)
     order = await run_in_threadpool(
-        create_order, 
-        request.trader_id, 
-        request.product_id, 
+        create_order,
+        request.trader_id,
+        request.product_id,
         request.fulfillment_type,
-        {}  # Empty delivery details for now
+        {},  # Empty delivery details for now
+        product["price"],
     )
     
     tx_ref = f"sharpshop_{order['id']}"
@@ -291,6 +336,19 @@ async def create_checkout(request: CheckoutRequest):
         customer_name=request.customer_name,
         redirect_url=f"https://sharpshop.app/pay/callback?order_id={order['id']}"
     )
+
+@app.get("/api/payment/verify")
+async def verify_payment(order_id: str):
+    """Verify an order's payment with Flutterwave.
+
+    check_order_status validates tx_ref/amount/currency server-side and
+    persists the paid status (which also decrements stock and notifies the
+    seller exactly once). Used by the /pay/callback page and the inline
+    checkout success callback.
+    """
+    from customer_tools import check_order_status
+    status = await run_in_threadpool(check_order_status, order_id)
+    return {"order_id": order_id, "status": status}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

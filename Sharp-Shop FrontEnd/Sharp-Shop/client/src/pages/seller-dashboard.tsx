@@ -66,7 +66,12 @@ export default function SellerDashboard() {
   const bio = trader?.bio || "No bio added yet.";
   const location = trader?.address || "Location not set";
   const whatsapp = trader?.whatsappNumber;
-  const followers = "1.2k"; // Mock data
+
+  // Real inventory stats derived from the product list
+  const productCount = products?.length || 0;
+  const totalStock = products?.reduce((sum, p) => sum + p.stockQuantity, 0) || 0;
+  const outOfStock = products?.filter((p) => p.stockQuantity === 0).length || 0;
+  const inventoryValue = products?.reduce((sum, p) => sum + p.price * p.stockQuantity, 0) || 0;
 
   return (
     <div className="h-screen w-full bg-black flex items-center justify-center">
@@ -128,7 +133,7 @@ export default function SellerDashboard() {
                         </div>
                     </div>
                     <p className="text-xs text-white/60 line-clamp-1">
-                        {username} • {followers} Followers
+                        {username}
                     </p>
                 </div>
             </div>
@@ -161,35 +166,35 @@ export default function SellerDashboard() {
                         className="overflow-hidden mb-4"
                     >
                         <div className="py-2">
-                            <p className="text-base font-semibold text-white mb-3 px-1">Business Analytics</p>
+                            <p className="text-base font-semibold text-white mb-3 px-1">Inventory Overview</p>
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-white/5">
                                     <div className="flex items-center gap-2 mb-2 text-white/60">
                                         <Package className="w-4 h-4 text-purple-500" />
                                         <span className="text-xs font-medium">Products</span>
                                     </div>
-                                    <p className="text-2xl font-bold text-white">{products?.length || 0}</p>
+                                    <p className="text-2xl font-bold text-white">{productCount}</p>
                                 </div>
                                 <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-white/5">
                                     <div className="flex items-center gap-2 mb-2 text-white/60">
                                         <Users className="w-4 h-4 text-blue-500" />
-                                        <span className="text-xs font-medium">Views</span>
+                                        <span className="text-xs font-medium">Units in Stock</span>
                                     </div>
-                                    <p className="text-2xl font-bold text-white">1.2k</p>
+                                    <p className="text-2xl font-bold text-white">{totalStock}</p>
                                 </div>
                                 <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-white/5">
                                     <div className="flex items-center gap-2 mb-2 text-white/60">
                                         <TrendingUp className="w-4 h-4 text-green-500" />
-                                        <span className="text-xs font-medium">Sales</span>
+                                        <span className="text-xs font-medium">Stock Value</span>
                                     </div>
-                                    <p className="text-2xl font-bold text-white">₦450k</p>
+                                    <p className="text-2xl font-bold text-white">₦{inventoryValue.toLocaleString()}</p>
                                 </div>
                                 <div className="bg-[#1E1E1E] p-4 rounded-2xl border border-white/5">
                                     <div className="flex items-center gap-2 mb-2 text-white/60">
-                                        <Star className="w-4 h-4 text-emerald-500" />
-                                        <span className="text-xs font-medium">Rating</span>
+                                        <Star className="w-4 h-4 text-red-500" />
+                                        <span className="text-xs font-medium">Out of Stock</span>
                                     </div>
-                                    <p className="text-2xl font-bold text-white">4.8</p>
+                                    <p className="text-2xl font-bold text-white">{outOfStock}</p>
                                 </div>
                             </div>
                         </div>

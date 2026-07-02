@@ -8,16 +8,19 @@ from customer_config import (
     MAX_TOKENS, MODEL_TEMPERATURE, ALLOWED_CATEGORIES
 )
 from customer_tools import (
-    get_shop_info, search_shop_products, get_product_details, 
-    get_products_by_category, check_product_availability, 
+    get_shop_info, search_shop_products, get_product_details,
+    get_products_by_category, check_product_availability,
     get_price_range, get_products_in_price_range,
-    create_order, create_payment_link, check_order_status, notify_seller
+    create_order, create_payment_link, check_order_status,
+    save_delivery_details
 )
 from customer_sessions import CustomerAgentState
 
-# Define the state again here or import? I can use the TypedDict from customer_sessions
-# But LangGraph needs it to be passed to StateGraph. 
-# The one in customer_sessions is good.
+# The LLM's decision JSON is applied to session state; only these keys/transitions
+# may be written by model output. "paid" is deliberately NOT reachable from the
+# LLM — it is only set after a verified Flutterwave check in execute_tools.
+ALLOWED_STATE_UPDATE_KEYS = {"delivery_details", "fulfillment_type"}
+ALLOWED_NEXT_STATES = {"browsing", "collecting_delivery_details", "completed"}
 
 def create_client() -> OpenAI:
     return OpenAI(base_url=GROQ_BASE_URL, api_key=GROQ_API_KEY)
@@ -33,7 +36,7 @@ RULES:
 1. If state is "browsing" and user mentions ANY product word (headphone, shoe, phone, charger, bag, etc.) -> SEARCH.
 2. If user says just "hi", "hello", "hey" with nothing else -> NO tool (greeting).
 3. If state is "awaiting_payment" and user says "paid" or "I paid" -> check_order_status.
-4. If state is "collecting_delivery_details" and user gives name+phone+address -> update delivery_details.
+4. If state is "collecting_delivery_details" and user gives name+phone+address -> update delivery_details and set next_state "completed".
 
 EXAMPLES:
 User: "Headphone" -> {{"tool": "search_shop_products", "args": {{"query": "headphone"}}}}
@@ -44,7 +47,7 @@ User: "wireless mouse" -> {{"tool": "search_shop_products", "args": {{"query": "
 User: "hi" -> {{"tool": null}}
 User: "hello there" -> {{"tool": null}}
 User: "I paid" (state=awaiting_payment) -> {{"tool": "check_order_status"}}
-User: "John, 08012345678, 5 Lagos Street" (state=collecting_delivery_details) -> {{"tool": null, "next_state": "paid", "state_updates": {{"delivery_details": {{"name": "John", "phone": "08012345678", "address": "5 Lagos Street"}}}}}}
+User: "John, 08012345678, 5 Lagos Street" (state=collecting_delivery_details) -> {{"tool": null, "next_state": "completed", "state_updates": {{"delivery_details": {{"name": "John", "phone": "08012345678", "address": "5 Lagos Street"}}}}}}
 
 OUTPUT ONLY VALID JSON (no extra text):
 {{"tool": "tool_name_or_null", "args": {{}}, "next_state": null, "state_updates": {{}}}}
@@ -65,6 +68,7 @@ INSTRUCTIONS:
 5. If STATUS is "awaiting_payment", remind them of the payment link.
 6. If STATUS is "collecting_delivery_details", ask for name, phone, and address.
 7. If STATUS is "paid", confirm the order.
+8. If STATUS is "completed", thank them and confirm their delivery details were received.
 
 Keep responses SHORT and helpful. Don't repeat the welcome message if you already searched.
 """
@@ -99,7 +103,9 @@ def process_message(state: CustomerAgentState) -> CustomerAgentState:
         )
     except Exception as e:
         print(f"API Error in process_message: {e}")
-        # Return state as is, maybe loop logic will retry or fail gracefully
+        # Clear any decision left over from the previous turn so execute_tools
+        # doesn't re-run a stale search/order action.
+        state["context"]["decision"] = {"tool": None}
         return state
     
     try:
@@ -136,23 +142,26 @@ def process_message(state: CustomerAgentState) -> CustomerAgentState:
                 decision["args"] = {"query": user_msg}
                 state["context"]["decision"] = decision
         
-        # Apply state updates immediately
-        if decision.get("next_state"):
-            state["status"] = decision["next_state"]
-        
-        if decision.get("state_updates"):
-            for k, v in decision["state_updates"].items():
-                if k == "delivery_details" and state.get("delivery_details"):
-                    # Merge details if partial
-                    state["delivery_details"].update(v)
-                else:
-                    state[k] = v
-            
-            # If status transitioned to PAID just now (via decision), trigger notification
-            if decision.get("next_state") == "paid":
-                 if state.get("order_id"):
-                      notify_seller(state["order_id"])
-                    
+        # Apply state updates, restricted to whitelisted keys/transitions.
+        # The model must never be able to set "paid" or touch identity fields.
+        next_state = decision.get("next_state")
+        if next_state in ALLOWED_NEXT_STATES:
+            state["status"] = next_state
+
+        for k, v in (decision.get("state_updates") or {}).items():
+            if k not in ALLOWED_STATE_UPDATE_KEYS:
+                print(f"[customer_agent] Ignoring non-whitelisted state update: {k}")
+                continue
+            if k == "delivery_details" and state.get("delivery_details") and isinstance(v, dict):
+                # Merge details if partial
+                state["delivery_details"].update(v)
+            else:
+                state[k] = v
+
+        # Delivery details collected for a verified-paid order -> persist them
+        if next_state == "completed" and state.get("order_id") and state.get("delivery_details"):
+            save_delivery_details(state["order_id"], state["delivery_details"])
+
     except Exception as e:
         print(f"Decision Parse Error: {e}")
         state["context"]["decision"] = {"tool": None}
@@ -170,56 +179,32 @@ def execute_tools(state: CustomerAgentState) -> CustomerAgentState:
     
     try:
         if tool_name == "search_shop_products":
-            # STATE RESET: New search means new interaction context.
-            # We must clear old order IDs and links to avoid confusion.
+            # New search means new interaction context: clear old order refs.
+            # Orders are NOT created here — they are created only when the
+            # customer commits (Buy button -> /api/checkout, or an explicit
+            # availability check below). Search must stay read-only.
             state["order_id"] = None
             state["payment_link"] = None
-            state["status"] = "browsing" # Default back to browsing until we find something
-            
+            state["status"] = "browsing"
+
             result = search_shop_products(trader_id, args.get("query", ""))
-            
-            # SMART SEARCH LOGIC (Aggressive):
-            # If results found (<= 3), generate links for ALL of them immediately.
-            # This avoids "asking questions" and gives the user immediate buy options.
+
             if result.get("results"):
-                 # Limit to top 3 to avoid spamming/latency
-                 top_results = result["results"][:3]
-                 enhanced_message = "Here is what I found:\n"
-                 
-                 for p in top_results:
-                      try:
-                          # Check availability first
-                          stock_res = check_product_availability(p["id"], trader_id)
-                          if stock_res.get("available"):
-                               # Create Order
-                               order_res = create_order(trader_id, p["id"], "delivery", {})
-                               if "id" in order_res:
-                                    link = create_payment_link(order_res["id"])
-                                    # Append to product info for display
-                                    p["payment_link"] = link
-                                    p["order_id"] = order_res["id"]
-                                    enhanced_message += f"\n- **{p['name']}**\n  Price: {p['price']} | Stock: {p['stock_quantity']}\n  [Buy Now]({link})\n"
-                          else:
-                               enhanced_message += f"\n- **{p['name']}** (Out of Stock)\n"
-                      except Exception as inner_e:
-                          print(f"[customer_agent] ERROR processing product {p.get('id')}: {inner_e}")
-                          enhanced_message += f"\n- **{p['name']}**\n  Price: {p['price']}\n"
-                 
-                 # If only one result, we also update state vars for context
-                 if len(top_results) == 1:
-                      # We need to find the order_id we just created.
-                      # Ideally we should have stored it in p, or we can assume it's the one we just made.
-                      # Let's update `p` in the loop above to include `order_id`.
-                      state["product_id"] = top_results[0]["id"]
-                      state["payment_link"] = top_results[0].get("payment_link")
-                      state["order_id"] = top_results[0].get("order_id")
-                      
-                      if state["payment_link"]:
-                          state["status"] = "awaiting_payment"
-                 
-                 result["message"] = enhanced_message
+                top_results = result["results"][:3]
+                lines = ["Here is what I found:"]
+                for p in top_results:
+                    if p["stock_quantity"] > 0:
+                        lines.append(f"- {p['name']}: ₦{p['price']:,} ({p['stock_quantity']} in stock)")
+                    else:
+                        lines.append(f"- {p['name']} (Out of Stock)")
+                lines.append("\nTap Buy on the product to pay securely, or ask me about any of these.")
+
+                if len(top_results) == 1:
+                    state["product_id"] = top_results[0]["id"]
+
+                result["message"] = "\n".join(lines)
             else:
-                 result = {"error": "No products found", "message": "I couldn't find exactly that. try checking our categories?"}
+                result = {"error": "No products found", "message": "I couldn't find exactly that. try checking our categories?"}
             
         elif tool_name == "check_product_availability":
             # If we are checking availability to Select a product
@@ -233,50 +218,52 @@ def execute_tools(state: CustomerAgentState) -> CustomerAgentState:
             
             if p_id:
                 result = check_product_availability(p_id, trader_id)
-                # CHAINING LOGIC: If available, immediately create order + payment link
+                # CHAINING LOGIC: explicit interest in one product -> offer a payment link.
+                # Reuse the session's existing order for this product instead of minting a new one.
                 if result.get("available"):
-                     state["product_id"] = p_id
-                     # Check if we already have an active order for this product to avoid dups?
-                     # For simplicity, create new if none exists
-                     order_res = create_order(
-                        trader_id, 
-                        p_id, 
-                        "delivery", # Default to delivery
-                        {}
-                     )
-                     if "id" in order_res:
-                        state["order_id"] = order_res["id"]
-                        link = create_payment_link(state["order_id"])
-                        state["payment_link"] = link
-                        state["status"] = "awaiting_payment"
-                        
-                        # Add to result so LLM sees it
+                    same_product = state.get("product_id") == p_id
+                    state["product_id"] = p_id
+                    if not (same_product and state.get("order_id") and state.get("payment_link")):
+                        order_res = create_order(trader_id, p_id, "delivery", {})
+                        link = create_payment_link(order_res["id"], amount=order_res.get("amount"))
+                        if link:
+                            state["order_id"] = order_res["id"]
+                            state["payment_link"] = link
+                            state["status"] = "awaiting_payment"
+                        else:
+                            result["message"] = "Product is available, but I couldn't set up payment right now. Please use the Buy button on the product."
+                    if state.get("payment_link"):
                         result["order_created"] = True
-                        result["payment_link"] = link
-                        result["message"] = "Order initialized. Link generated."
+                        result["payment_link"] = state["payment_link"]
+                        result["message"] = f"{result.get('product_name', 'This product')} is available! Pay securely here: {state['payment_link']}"
             else:
                 result = {"error": "Product not identified"}
                 
-        elif tool_name == "create_order":
-             # Usually called automatically when entering AWAITING_PAYMENT?
-             pass 
-             
         elif tool_name == "create_payment_link":
              order_id = state.get("order_id")
              if order_id:
-                 result = create_payment_link(order_id)
-                 state["payment_link"] = result
+                 link = create_payment_link(order_id)
+                 if link:
+                     state["payment_link"] = link
+                     result = {"payment_link": link}
+                 else:
+                     result = {"error": "Could not generate payment link right now"}
              else:
                  result = "Error: No order ID"
                  
         elif tool_name == "check_order_status":
              order_id = state.get("order_id")
              if order_id:
+                 # check_order_status verifies amount/currency with Flutterwave
+                 # and persists "paid" to the order row; seller notification
+                 # fires inside that pending->paid transition, not here.
                  status = check_order_status(order_id)
                  result = {"status": status}
                  if status == "paid":
-                     state["status"] = "paid"
-                     notify_seller(order_id)
+                     if state.get("delivery_details"):
+                         state["status"] = "paid"
+                     else:
+                         state["status"] = "collecting_delivery_details"
              else:
                  result = "Error: No order ID"
                  
@@ -290,24 +277,7 @@ def execute_tools(state: CustomerAgentState) -> CustomerAgentState:
 
     except Exception as e:
         result = {"error": str(e)}
-        
-    # Automatic Actions Logic outside explicit tool calls
-    # REMOVED: Previous logic that created order on entering awaiting_payment
-    # Reason: We now do it eagerly in check_product_availability
-    pass
-    
-    # If checking status returns PAID, decide next step
-    if state["context"].get("decision", {}).get("tool") == "check_order_status":
-        if isinstance(result, dict) and result.get("status") == "paid":
-             # CHECK IF DETAILS ALREADY EXIST
-             if state.get("delivery_details") and len(str(state["delivery_details"])) > 10:
-                  state["status"] = "paid"
-                  # Notify seller immediately since we are skipping the collection step
-                  if state.get("order_id"):
-                      notify_seller(state["order_id"])
-             else:
-                  state["status"] = "collecting_delivery_details"
-    
+
     state["context"]["tool_result"] = result
 
     try:
@@ -326,12 +296,33 @@ def execute_tools(state: CustomerAgentState) -> CustomerAgentState:
         pass
     return state
 
+def _slim_tool_results(tool_results):
+    """Trim product payloads (descriptions, image URLs) before injecting into the
+    prompt — the full result stays in state for the API response."""
+    if isinstance(tool_results, dict) and isinstance(tool_results.get("results"), list):
+        slim = dict(tool_results)
+        slim["results"] = [
+            {k: p.get(k) for k in ("name", "price", "stock_quantity") if k in p}
+            for p in tool_results["results"][:5]
+        ]
+        return slim
+    return tool_results
+
 def synthesize_response(state: CustomerAgentState) -> CustomerAgentState:
     """Generate final response using tool results."""
+    raw_result = state["context"].get("tool_result")
+
+    # Server-built messages (search results, payment links) are already final.
+    # Echoing them through the LLM costs a call and can mangle text — e.g. it
+    # rewrote ₦5,000 as ₹5,000. Use them verbatim.
+    if isinstance(raw_result, dict) and raw_result.get("message"):
+        state["messages"].append({"role": "assistant", "content": raw_result["message"]})
+        return state
+
     client = create_client()
-    
-    tool_results = state["context"].get("tool_result")
-    
+
+    tool_results = _slim_tool_results(raw_result)
+
     system_msg = RESPONSE_SYSTEM_PROMPT.format(
         shop_name=state["trader_name"],
         status=state.get("status", "browsing"),
@@ -421,12 +412,14 @@ def build_customer_graph() -> StateGraph:
     
     return graph.compile()
 
+# Compile once at import time; recompiling per message is pure overhead
+_CUSTOMER_GRAPH = build_customer_graph()
+
 # Public function to handle chat
 def handle_customer_chat(session_state: CustomerAgentState, user_message: str) -> CustomerAgentState:
     # Append user message to state
     session_state["messages"].append({"role": "user", "content": user_message})
-    
-    app = build_customer_graph()
-    final_state = app.invoke(session_state)
-    
+
+    final_state = _CUSTOMER_GRAPH.invoke(session_state)
+
     return final_state

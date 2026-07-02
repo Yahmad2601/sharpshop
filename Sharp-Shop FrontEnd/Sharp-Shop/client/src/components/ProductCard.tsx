@@ -6,6 +6,7 @@ import { type Product } from "@shared/schema";
 import { StockIndicator } from "./StockIndicator";
 import { ActionButtons } from "./ActionButtons";
 import { useToast } from "@/hooks/use-toast";
+import { CHAT_API_BASE } from "@/lib/api";
 import { useFavorites } from "@/hooks/use-favorites";
 import { useLikes } from "@/hooks/use-likes";
 import { useAuth } from "@/contexts/AuthContext";
@@ -47,8 +48,8 @@ export function ProductCard({ product }: ProductCardProps) {
   const isProductFavorite = isFavorite(product.id);
 
   const handleBuyClick = async () => {
-    const API_BASE = import.meta.env.VITE_CHAT_API_URL || "http://localhost:8000";
-    
+    const API_BASE = CHAT_API_BASE;
+
     try {
       // Show loading toast
       toast({
@@ -96,14 +97,29 @@ export function ProductCard({ product }: ProductCardProps) {
             description: `Payment for ${data.product_name}`,
             logo: window.location.origin + "/favicon.svg",
           },
-          callback: function(response: { status: string; transaction_id: string }) {
-            console.log("Payment response:", response);
-            if (response.status === "successful") {
-              toast({
-                title: "Payment Successful! 🎉",
-                description: "Your order has been placed.",
-              });
+          callback: async function(response: { status: string; transaction_id: string }) {
+            if (response.status !== "successful") return;
+            // Confirm with the backend (it verifies amount/currency with
+            // Flutterwave) rather than trusting the client-side status.
+            try {
+              const verifyRes = await fetch(
+                `${API_BASE}/api/payment/verify?order_id=${encodeURIComponent(data.order_id)}`
+              );
+              const verify = await verifyRes.json();
+              if (verify.status === "paid") {
+                toast({
+                  title: "Payment Successful! 🎉",
+                  description: "Your order has been placed and the seller notified.",
+                });
+                return;
+              }
+            } catch (verifyErr) {
+              console.error("Payment verification failed:", verifyErr);
             }
+            toast({
+              title: "Payment received",
+              description: "We're confirming it with the payment provider — check back shortly.",
+            });
           },
           onclose: function() {
             console.log("Payment modal closed");

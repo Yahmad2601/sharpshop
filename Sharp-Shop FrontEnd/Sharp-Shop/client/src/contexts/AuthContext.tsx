@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { User } from "@shared/schema";
 import { apiClient } from "@/lib/api";
+import { peekGuestId, clearGuestId } from "@/lib/guest";
 
 interface AuthContextType {
   user: User | null;
@@ -26,10 +28,34 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Adopt guest likes/favorites/comments into the account so nothing the
+  // user did before signing in disappears. Best-effort — a failure here
+  // must not block login.
+  const mergeGuestData = async () => {
+    const guestId = peekGuestId();
+    if (!guestId) return;
+    try {
+      const response = await apiClient.fetch("/api/user/merge-guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestId }),
+      });
+      if (response.ok) {
+        clearGuestId();
+        queryClient.invalidateQueries({ queryKey: ["favorites"] });
+        queryClient.invalidateQueries({ queryKey: ["likes"] });
+        queryClient.invalidateQueries({ queryKey: ["comments"] });
+      }
+    } catch (error) {
+      console.error("Guest data merge failed:", error);
+    }
+  };
 
   const checkAuth = async () => {
     try {
@@ -58,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const userData = await response.json();
     setUser(userData);
+    await mergeGuestData();
   };
 
   const register = async (data: RegisterData) => {
@@ -74,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const userData = await response.json();
     setUser(userData);
+    await mergeGuestData();
   };
 
   const logout = async () => {

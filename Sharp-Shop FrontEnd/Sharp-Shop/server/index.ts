@@ -35,6 +35,10 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+// Paths whose response bodies must never be logged (user objects, sessions)
+const SENSITIVE_LOG_PATHS = ["/api/login", "/api/register", "/api/user"];
+const MAX_LOGGED_BODY_CHARS = 200;
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -50,8 +54,12 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      if (capturedJsonResponse && !SENSITIVE_LOG_PATHS.includes(path)) {
+        let body = JSON.stringify(capturedJsonResponse);
+        if (body.length > MAX_LOGGED_BODY_CHARS) {
+          body = body.slice(0, MAX_LOGGED_BODY_CHARS) + "…";
+        }
+        logLine += ` :: ${body}`;
       }
 
       log(logLine);
@@ -69,8 +77,10 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    res.status(status).json({ message });
-    throw err;
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(status).json({ message });
+    }
   });
 
   // importantly only setup vite in development and after

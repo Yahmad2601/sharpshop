@@ -3,6 +3,9 @@ from typing import Optional
 from config import ALLOWED_CATEGORIES
 from database import get_supabase
 
+# Columns the agent is allowed to modify; anything else from LLM output is dropped
+UPDATABLE_FIELDS = {"price", "stock_quantity", "description", "name", "category", "is_active"}
+
 def validate_product_data(data: dict) -> tuple[bool, str]:
     """Validate product data before creation/update."""
     if "price" in data and (not isinstance(data["price"], (int, float)) or data["price"] <= 0):
@@ -87,6 +90,10 @@ def query_inventory(search_term: str, trader_id: str) -> dict:
 
 def update_product(product_id: str, updates: dict, trader_id: str) -> dict:
     """Update an existing product."""
+    updates = {k: v for k, v in updates.items() if k in UPDATABLE_FIELDS}
+    if not updates:
+        return {"success": False, "error": "No valid fields to update"}
+
     valid, error = validate_product_data(updates)
     if not valid:
         return {"success": False, "error": error}
