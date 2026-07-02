@@ -32,3 +32,9 @@ ENCOURAGE_WHATSAPP_CONTACT = True
 FLUTTERWAVE_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY", "")
 FLUTTERWAVE_PUBLIC_KEY = os.getenv("FLUTTERWAVE_PUBLIC_KEY", "")
 FLUTTERWAVE_BASE_URL = "https://api.flutterwave.com/v3"
+
+# Twilio (shared with the seller bot). WHATSAPP_FROM is the sender number in
+# Twilio's "whatsapp:+14155238886" format; defaults to the public sandbox.
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")

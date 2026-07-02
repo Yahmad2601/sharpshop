@@ -95,22 +95,6 @@ def get_product_details(trader_id: str, product_id: str) -> Optional[Dict[str, A
         return response.data[0]
     return None
 
-def get_products_by_category(trader_id: str, category: str) -> List[Dict[str, Any]]:
-    """Filter products by category."""
-    if category not in ALLOWED_CATEGORIES:
-        return []
-        
-    supabase = get_supabase()
-    response = supabase.table("products") \
-        .select("*") \
-        .eq("trader_id", trader_id) \
-        .eq("is_active", True) \
-        .eq("category", category) \
-        .order("stock_quantity", desc=True) \
-        .execute()
-        
-    return response.data
-
 def check_product_availability(product_id: str, trader_id: str) -> Dict[str, Any]:
     """Real-time stock check."""
     product = get_product_details(trader_id, product_id)
@@ -122,48 +106,6 @@ def check_product_availability(product_id: str, trader_id: str) -> Dict[str, Any
         "stock_quantity": product["stock_quantity"],
         "product_name": product["name"]
     }
-
-def get_price_range(trader_id: str) -> Dict[str, float]:
-    """Help customers filter by budget."""
-    supabase = get_supabase()
-    
-    # We need aggregations (min, max, avg). Supabase-py doesn't have direct aggregation helper 
-    # in the fluent API easily without RPC or raw SQL usually.
-    # Since we can't easily add RPC, we'll fetch prices and calc in python 
-    # (assuming product count isn't massive logic).
-    # Ideally should use .select('price')
-    
-    response = supabase.table("products") \
-        .select("price") \
-        .eq("trader_id", trader_id) \
-        .eq("is_active", True) \
-        .execute()
-        
-    prices = [p['price'] for p in response.data if p.get('price') is not None]
-    
-    if not prices:
-        return {"min_price": 0, "max_price": 0, "average_price": 0}
-        
-    return {
-        "min_price": min(prices),
-        "max_price": max(prices),
-        "average_price": sum(prices) / len(prices)
-    }
-
-def get_products_in_price_range(trader_id: str, min_price: float, max_price: float) -> List[Dict[str, Any]]:
-    """Find products within budget."""
-    supabase = get_supabase()
-    
-    response = supabase.table("products") \
-        .select("*") \
-        .eq("trader_id", trader_id) \
-        .eq("is_active", True) \
-        .gte("price", min_price) \
-        .lte("price", max_price) \
-        .order("price", desc=False) \
-        .execute()
-        
-    return response.data
 
 def get_shop_products(trader_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     """Fetch a list of active products for the shop preview."""
@@ -334,30 +276,69 @@ def save_delivery_details(order_id: str, details: dict) -> bool:
         print(f"Failed to save delivery details for order {order_id}: {e}")
         return False
 
-def notify_seller(order_id: str) -> bool:
-    """Notify the seller about a paid order.
+def _send_whatsapp(to_number: str, body: str) -> bool:
+    """Send a WhatsApp message via Twilio. Returns False (and logs) if Twilio
+    isn't configured, so a missing credential never breaks the payment flow."""
+    from customer_config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM
+    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN):
+        print(f"🔔 (Twilio not configured) would notify {to_number}: {body}")
+        return False
 
-    NOTE: actual WhatsApp/SMS delivery is not implemented yet — this resolves the
-    real seller contact and logs the message so the send call can be dropped in later.
-    """
+    # Twilio expects E.164 in "whatsapp:+234..." form
+    digits = "".join(ch for ch in to_number if ch.isdigit())
+    if not digits:
+        print(f"Notification skipped: seller has no usable phone number ({to_number!r})")
+        return False
+    to = f"whatsapp:+{digits}"
+
+    try:
+        from twilio.rest import Client
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        client.messages.create(from_=TWILIO_WHATSAPP_FROM, to=to, body=body)
+        print(f"🔔 Notified seller {to}")
+        return True
+    except Exception as e:
+        print(f"Twilio send failed for {to}: {e}")
+        return False
+
+
+def notify_seller(order_id: str) -> bool:
+    """Send a WhatsApp notification to the seller about a paid order."""
     supabase = get_supabase()
     try:
-        order_resp = supabase.table("orders").select("trader_id").eq("id", order_id).execute()
+        order_resp = supabase.table("orders") \
+            .select("trader_id, amount, currency, product_id") \
+            .eq("id", order_id).execute()
         if not order_resp.data:
             print(f"Notification skipped: order {order_id} not found")
             return False
+        order = order_resp.data[0]
 
         trader_resp = supabase.table("traders").select("whatsapp_number, business_name") \
-            .eq("id", order_resp.data[0]["trader_id"]).execute()
+            .eq("id", order["trader_id"]).execute()
         if not trader_resp.data:
             print(f"Notification skipped: trader for order {order_id} not found")
             return False
 
-        phone = trader_resp.data[0]["whatsapp_number"]
-        message = f"New paid order on SharpShop! Order ID: {order_id}. Please check your dashboard."
-        # TODO: send via Twilio WhatsApp once an outbound sender number is configured
-        print(f"🔔 NOTIFY SELLER {phone}: {message}")
-        return True
+        phone = trader_resp.data[0].get("whatsapp_number")
+        if not phone:
+            print(f"Notification skipped: trader {order['trader_id']} has no WhatsApp number")
+            return False
+
+        product_name = "your product"
+        prod_resp = supabase.table("products").select("name").eq("id", order["product_id"]).execute()
+        if prod_resp.data:
+            product_name = prod_resp.data[0]["name"]
+
+        amount = f"{order.get('currency', 'NGN')} {float(order['amount']):,.0f}"
+        message = (
+            f"🎉 New paid order on SharpShop!\n\n"
+            f"Product: {product_name}\n"
+            f"Amount: {amount}\n"
+            f"Order ID: {order_id}\n\n"
+            f"Open your dashboard to view delivery details."
+        )
+        return _send_whatsapp(phone, message)
 
     except Exception as e:
         print(f"Notification Error: {e}")

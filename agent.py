@@ -15,7 +15,6 @@ from config import GROQ_API_KEY, GROQ_BASE_URL, MODEL_NAME, ALLOWED_CATEGORIES
 from tools import create_product, query_inventory, update_product, list_products
 
 REQUIRED_FIELDS = ["name", "price", "category", "stock"]
-OPTIONAL_FIELDS = ["description", "image"]
 # Keys the LLM may pass through to create_product(**data)
 CREATE_PRODUCT_FIELDS = {"name", "price", "category", "stock", "description"}
 

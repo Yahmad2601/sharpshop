@@ -147,9 +147,6 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
                     <p className="text-sm text-white/90 leading-snug">
                       {comment.content}
                     </p>
-                    <button className="text-xs text-white/50 font-medium hover:text-white/80">
-                      Reply
-                    </button>
                   </div>
                   {comment.emojiReaction && (
                     <div className="text-lg">
@@ -190,9 +187,6 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
                 }}
                 disabled={addCommentMutation.isPending}
               />
-              <button className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white">
-                @
-              </button>
             </div>
             {newComment && (
               <Button

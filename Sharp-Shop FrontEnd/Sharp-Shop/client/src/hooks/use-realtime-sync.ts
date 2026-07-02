@@ -37,6 +37,13 @@ export function useRealtimeSync() {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "orders" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["/api/orders/me"] });
+        }
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "comments" },
         (payload: { new?: { product_id?: string }; old?: { product_id?: string } }) => {
           queryClient.invalidateQueries({ queryKey: ["comments", "counts"] });

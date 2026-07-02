@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["favorites"] });
         queryClient.invalidateQueries({ queryKey: ["likes"] });
         queryClient.invalidateQueries({ queryKey: ["comments"] });
+        queryClient.invalidateQueries({ queryKey: ["follows"] });
       }
     } catch (error) {
       console.error("Guest data merge failed:", error);

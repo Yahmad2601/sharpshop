@@ -1,13 +1,27 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery } from "@tanstack/react-query";
-import { Product, Trader } from "@shared/schema";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Product, Trader, OrderWithProduct } from "@shared/schema";
+import { formatDistanceToNow } from "date-fns";
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { ProductSkeleton } from "@/components/ProductSkeleton";
+import { ProductEditModal } from "@/components/ProductEditModal";
+import { ProfileEditModal } from "@/components/ProfileEditModal";
+import { useToast } from "@/hooks/use-toast";
 import { 
   ArrowLeft, 
   MapPin, 
@@ -25,10 +39,60 @@ import {
   Phone
 } from "lucide-react";
 
+const ORDER_STATUS_STYLES: Record<string, string> = {
+  paid: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  pending: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+  failed: "bg-red-500/15 text-red-400 border-red-500/30",
+  fulfilled: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+};
+
+function formatOrderTime(raw: string): string {
+  const date = new Date(raw);
+  if (isNaN(date.getTime())) return "";
+  return formatDistanceToNow(date, { addSuffix: true });
+}
+
+function OrderRow({ order }: { order: OrderWithProduct }) {
+  const details = order.deliveryDetails;
+  return (
+    <div className="bg-[#1E1E1E] rounded-2xl border border-white/5 p-3 flex gap-3">
+      <div className="w-14 h-14 rounded-xl bg-white/5 overflow-hidden shrink-0">
+        {order.productImageUrl ? (
+          <img src={order.productImageUrl} alt={order.productName ?? "Product"} className="w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <Package className="w-full h-full p-3 text-white/20" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-white text-sm font-semibold truncate">{order.productName ?? "Unknown product"}</p>
+          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border shrink-0 ${ORDER_STATUS_STYLES[order.status] ?? "bg-white/10 text-white/60 border-white/10"}`}>
+            {order.status}
+          </span>
+        </div>
+        <p className="text-emerald-400 text-sm font-bold">₦{Number(order.amount).toLocaleString()}</p>
+        <p className="text-white/40 text-[11px]">
+          {order.fulfillmentType === "pickup" ? "Pickup" : "Delivery"} • {formatOrderTime(order.createdAt)}
+        </p>
+        {details && (details.name || details.phone || details.address) && (
+          <p className="text-white/60 text-[11px] mt-1 truncate">
+            {[details.name, details.phone, details.address].filter(Boolean).join(" • ")}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SellerDashboard() {
   const { user, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "seller")) {
@@ -43,6 +107,29 @@ export default function SellerDashboard() {
 
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products/trader", trader?.id],
+    enabled: !!trader?.id,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (productId: string) => {
+      const res = await fetch(`/api/products/${productId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to delete product");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/products") });
+      toast({ title: "Product removed" });
+      setDeletingProduct(null);
+    },
+    onError: () => {
+      toast({ title: "Couldn't delete product", variant: "destructive" });
+    },
+  });
+
+  const { data: orders, isLoading: ordersLoading } = useQuery<OrderWithProduct[]>({
+    queryKey: ["/api/orders/me"],
     enabled: !!trader?.id,
   });
 
@@ -100,12 +187,17 @@ export default function SellerDashboard() {
                     </Button>
                 </Link>
                 <div className="flex gap-2">
-                    <Button size="icon" variant="secondary" className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-white hover:bg-black/60">
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-white hover:bg-black/60"
+                      onClick={() => setIsEditingProfile(true)}
+                    >
                         <Settings className="w-5 h-5" />
                     </Button>
-                    <Button 
-                      size="icon" 
-                      variant="secondary" 
+                    <Button
+                      size="icon"
+                      variant="secondary"
                       className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-red-500 hover:bg-red-500/20"
                       onClick={() => logout()}
                     >
@@ -118,12 +210,9 @@ export default function SellerDashboard() {
         {/* Profile Info */}
         <div className="px-4 -mt-12 relative z-10 flex-1 flex flex-col">
             <div className="flex items-end gap-4 mb-4">
-                <Avatar className="w-24 h-24 border-4 border-[#121212] shadow-xl cursor-pointer hover:opacity-80 transition-opacity">
+                <Avatar className="w-24 h-24 border-4 border-[#121212] shadow-xl">
                     <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${traderName}`} />
                     <AvatarFallback className="bg-primary text-white text-2xl">{traderName[0]}</AvatarFallback>
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity rounded-full">
-                      <Edit className="w-6 h-6 text-white" />
-                    </div>
                 </Avatar>
                 <div className="pb-2 flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -140,7 +229,10 @@ export default function SellerDashboard() {
 
             {/* Action Buttons */}
             <div className="flex gap-2 mb-4">
-                <Button className="flex-1 bg-white/10 hover:bg-white/20 text-white font-bold rounded-full h-10 text-base border border-white/10">
+                <Button
+                    onClick={() => setIsEditingProfile(true)}
+                    className="flex-1 bg-white/10 hover:bg-white/20 text-white font-bold rounded-full h-10 text-base border border-white/10"
+                >
                     <Edit className="w-4 h-4 mr-2" />
                     Edit Profile
                 </Button>
@@ -240,28 +332,41 @@ export default function SellerDashboard() {
                     >
                         My Products
                     </TabsTrigger>
-                    <TabsTrigger 
-                        value="orders" 
+                    <TabsTrigger
+                        value="orders"
                         className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-emerald-500 data-[state=active]:bg-transparent data-[state=active]:text-emerald-500 text-white/60 pb-3 font-bold text-sm uppercase tracking-wide"
                     >
-                        Orders
+                        Orders{orders && orders.length > 0 ? ` (${orders.length})` : ""}
                     </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="products" className="mt-0 flex-1">
                     <div className="grid grid-cols-3 gap-0.5 pb-20">
                         {products?.map((product) => (
-                            <div key={product.id} className="aspect-[3/4] relative bg-white/5 group cursor-pointer overflow-hidden">
-                                <img 
-                                    src={product.imageUrl} 
-                                    alt={product.name} 
+                            <div key={product.id} className="aspect-[3/4] relative bg-white/5 group overflow-hidden">
+                                <img
+                                    src={product.imageUrl}
+                                    alt={product.name}
                                     className="w-full h-full object-cover"
+                                    loading="lazy"
                                 />
                                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
-                                    <Button size="sm" variant="secondary" className="h-8 w-8 p-0 rounded-full bg-white text-black hover:bg-white/90">
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="h-8 w-8 p-0 rounded-full bg-white text-black hover:bg-white/90"
+                                        onClick={() => setEditingProduct(product)}
+                                        aria-label={`Edit ${product.name}`}
+                                    >
                                         <Edit className="w-4 h-4" />
                                     </Button>
-                                    <Button size="sm" variant="destructive" className="h-8 w-8 p-0 rounded-full">
+                                    <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        className="h-8 w-8 p-0 rounded-full"
+                                        onClick={() => setDeletingProduct(product)}
+                                        aria-label={`Delete ${product.name}`}
+                                    >
                                         <Trash2 className="w-4 h-4" />
                                     </Button>
                                 </div>
@@ -280,14 +385,61 @@ export default function SellerDashboard() {
                 </TabsContent>
                 
                 <TabsContent value="orders" className="mt-0 flex-1">
-                    <div className="flex flex-col items-center justify-center py-20 text-white/40">
-                        <Package className="w-12 h-12 mb-4 opacity-50" />
-                        <p className="text-sm">No active orders</p>
-                    </div>
+                    {ordersLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-white/40">
+                            <p className="text-sm">Loading orders…</p>
+                        </div>
+                    ) : orders && orders.length > 0 ? (
+                        <div className="space-y-3 pt-3 pb-20">
+                            {orders.map((order) => (
+                                <OrderRow key={order.id} order={order} />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-20 text-white/40">
+                            <Package className="w-12 h-12 mb-4 opacity-50" />
+                            <p className="text-sm">No orders yet</p>
+                            <p className="text-xs mt-1 text-white/30">Paid orders will appear here automatically</p>
+                        </div>
+                    )}
                 </TabsContent>
             </Tabs>
         </div>
       </div>
+
+      <ProductEditModal
+        product={editingProduct}
+        isOpen={!!editingProduct}
+        onClose={() => setEditingProduct(null)}
+      />
+
+      <ProfileEditModal
+        trader={trader}
+        isOpen={isEditingProfile}
+        onClose={() => setIsEditingProfile(false)}
+      />
+
+      <AlertDialog open={!!deletingProduct} onOpenChange={(o) => !o && setDeletingProduct(null)}>
+        <AlertDialogContent className="bg-[#1a1a1a] border-white/10 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this product?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/60">
+              "{deletingProduct?.name}" will be hidden from your shop. This can't be undone from here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingProduct && deleteMutation.mutate(deletingProduct.id)}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

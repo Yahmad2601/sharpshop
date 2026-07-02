@@ -8,11 +8,9 @@ from customer_config import (
     MAX_TOKENS, MODEL_TEMPERATURE, ALLOWED_CATEGORIES
 )
 from customer_tools import (
-    get_shop_info, search_shop_products, get_product_details,
-    get_products_by_category, check_product_availability,
-    get_price_range, get_products_in_price_range,
+    get_shop_info, search_shop_products, check_product_availability,
     create_order, create_payment_link, check_order_status,
-    save_delivery_details
+    save_delivery_details, get_shop_products
 )
 from customer_sessions import CustomerAgentState
 
@@ -37,6 +35,7 @@ RULES:
 2. If user says just "hi", "hello", "hey" with nothing else -> NO tool (greeting).
 3. If state is "awaiting_payment" and user says "paid" or "I paid" -> check_order_status.
 4. If state is "collecting_delivery_details" and user gives name+phone+address -> update delivery_details and set next_state "completed".
+5. If user asks to see EVERYTHING / the whole catalog (no specific product named), e.g. "what do you have", "show me everything", "what do you sell", "list your products" -> list_products.
 
 EXAMPLES:
 User: "Headphone" -> {{"tool": "search_shop_products", "args": {{"query": "headphone"}}}}
@@ -44,6 +43,9 @@ User: "Tell me about headphone" -> {{"tool": "search_shop_products", "args": {{"
 User: "I need a charger" -> {{"tool": "search_shop_products", "args": {{"query": "charger"}}}}
 User: "Do you have bags?" -> {{"tool": "search_shop_products", "args": {{"query": "bags"}}}}
 User: "wireless mouse" -> {{"tool": "search_shop_products", "args": {{"query": "wireless mouse"}}}}
+User: "what do you have?" -> {{"tool": "list_products"}}
+User: "show me everything" -> {{"tool": "list_products"}}
+User: "what are you selling" -> {{"tool": "list_products"}}
 User: "hi" -> {{"tool": null}}
 User: "hello there" -> {{"tool": null}}
 User: "I paid" (state=awaiting_payment) -> {{"tool": "check_order_status"}}
@@ -134,9 +136,20 @@ def process_message(state: CustomerAgentState) -> CustomerAgentState:
             # Check if it's NOT a greeting
             greetings = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "howdy", "yo"}
             is_greeting = user_msg in greetings or user_msg.startswith("hi ") or user_msg.startswith("hello ")
-            
-            # If not a greeting and message has substance (>2 chars), assume it's a product query
-            if not is_greeting and len(user_msg) > 2:
+
+            # Catalog-browse phrases: show everything rather than searching the literal sentence
+            list_phrases = ("what do you have", "what do you sell", "what are you selling",
+                            "show me everything", "show everything", "list your product",
+                            "list products", "see everything", "everything you have",
+                            "what you get", "wetin you get", "your products", "all products",
+                            "show me your")
+            if not is_greeting and any(p in user_msg for p in list_phrases):
+                print(f"[customer_agent] FALLBACK: list_products for '{user_msg}'")
+                decision["tool"] = "list_products"
+                decision["args"] = {}
+                state["context"]["decision"] = decision
+            # Otherwise if not a greeting and message has substance (>2 chars), assume it's a product query
+            elif not is_greeting and len(user_msg) > 2:
                 print(f"[customer_agent] FALLBACK: Forcing search for '{user_msg}'")
                 decision["tool"] = "search_shop_products"
                 decision["args"] = {"query": user_msg}
@@ -205,7 +218,27 @@ def execute_tools(state: CustomerAgentState) -> CustomerAgentState:
                 result["message"] = "\n".join(lines)
             else:
                 result = {"error": "No products found", "message": "I couldn't find exactly that. try checking our categories?"}
-            
+
+        elif tool_name == "list_products":
+            # Browsing the whole catalog — read-only, no orders created here.
+            state["order_id"] = None
+            state["payment_link"] = None
+            state["status"] = "browsing"
+
+            products = get_shop_products(trader_id, limit=10)
+            result = {"results": products, "total": len(products)}
+            if products:
+                lines = ["Here's what this shop has:"]
+                for p in products:
+                    if p.get("stock_quantity", 0) > 0:
+                        lines.append(f"- {p['name']}: ₦{p['price']:,} ({p['stock_quantity']} in stock)")
+                    else:
+                        lines.append(f"- {p['name']} (Out of Stock)")
+                lines.append("\nAsk me about any of these, or tap Buy on a product to pay securely.")
+                result["message"] = "\n".join(lines)
+            else:
+                result["message"] = "This shop hasn't listed any products yet. Check back soon!"
+
         elif tool_name == "check_product_availability":
             # If we are checking availability to Select a product
             p_id = args.get("product_id") or state.get("product_id")

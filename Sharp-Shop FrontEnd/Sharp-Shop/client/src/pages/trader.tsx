@@ -4,11 +4,10 @@ import { ProductSkeleton } from "@/components/ProductSkeleton";
 import {
   ArrowLeft,
   MapPin,
-  Mail,
-  MoreHorizontal,
   Share2,
   Star,
   UserPlus,
+  UserCheck,
   AlertCircle,
   RefreshCw,
   Phone
@@ -19,11 +18,35 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useParams, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { CustomerChat } from "@/components/CustomerChat";
+import { useFollow } from "@/hooks/use-follow";
+import { useToast } from "@/hooks/use-toast";
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+}
 
 export default function TraderProfile() {
   const [, setLocation] = useLocation();
   const params = useParams<{ traderId: string }>();
   const traderId = params.traderId;
+  const { toast } = useToast();
+  const { followerCount, isFollowing, toggleFollow } = useFollow(traderId);
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "SharpShop", text: "Check out this shop on SharpShop!", url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        toast({ title: "Link copied!", description: "Shop link copied to clipboard." });
+      }
+    } catch {
+      /* user dismissed the share sheet — ignore */
+    }
+  };
 
   const {
     data: trader,
@@ -125,14 +148,14 @@ export default function TraderProfile() {
                 <ArrowLeft className="w-6 h-6" />
               </Button>
             </Link>
-            <div className="flex gap-2">
-              <Button size="icon" variant="secondary" className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-white hover:bg-black/60">
-                <Share2 className="w-5 h-5" />
-              </Button>
-              <Button size="icon" variant="secondary" className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-white hover:bg-black/60">
-                <MoreHorizontal className="w-5 h-5" />
-              </Button>
-            </div>
+            <Button
+              size="icon"
+              variant="secondary"
+              onClick={handleShare}
+              className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-white hover:bg-black/60"
+            >
+              <Share2 className="w-5 h-5" />
+            </Button>
           </div>
         </div>
 
@@ -151,7 +174,7 @@ export default function TraderProfile() {
                 </div>
               </div>
               <p className="text-xs text-white/60 line-clamp-1">
-                {username}
+                {username} • {formatCount(followerCount)} {followerCount === 1 ? "Follower" : "Followers"}
               </p>
             </div>
           </div>
@@ -167,9 +190,19 @@ export default function TraderProfile() {
                 WhatsApp
               </Button>
             )}
-            <Button className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-full h-10 text-base">
-              <UserPlus className="w-5 h-5 mr-2" />
-              Follow
+            <Button
+              onClick={toggleFollow}
+              className={`flex-1 font-bold rounded-full h-10 text-base transition-colors ${
+                isFollowing
+                  ? "bg-white/10 hover:bg-white/20 text-white border border-white/20"
+                  : "bg-emerald-500 hover:bg-emerald-600 text-white"
+              }`}
+            >
+              {isFollowing ? (
+                <><UserCheck className="w-5 h-5 mr-2" />Following</>
+              ) : (
+                <><UserPlus className="w-5 h-5 mr-2" />Follow</>
+              )}
             </Button>
           </div>
 
@@ -178,10 +211,6 @@ export default function TraderProfile() {
             <Button variant="outline" size="sm" className="rounded-full bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:text-white h-8 text-xs">
               <MapPin className="w-3 h-3 mr-2" />
               {location}
-            </Button>
-            <Button variant="outline" size="sm" className="rounded-full bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:text-white h-8 text-xs">
-              <Mail className="w-3 h-3 mr-2" />
-              Contact
             </Button>
           </div>
 

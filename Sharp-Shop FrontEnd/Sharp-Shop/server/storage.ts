@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Product, type InsertProduct, type Comment, type InsertComment, type Favorite, type InsertFavorite, type Like, type InsertLike, type Trader, type InsertTrader } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Comment, type InsertComment, type Favorite, type InsertFavorite, type Like, type InsertLike, type Trader, type InsertTrader, type OrderWithProduct, type Follow, type InsertFollow } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { supabase } from "./supabase";
 import session from "express-session";
@@ -17,12 +17,15 @@ export interface IStorage {
   createTrader(trader: InsertTrader): Promise<Trader>;
   getTrader(id: string): Promise<Trader | undefined>;
   getTraderByUserId(userId: string): Promise<Trader | undefined>;
+  updateTrader(id: string, updates: Partial<InsertTrader>): Promise<Trader | undefined>;
   
   getAllProducts(): Promise<Product[]>;
   getProduct(id: string): Promise<Product | undefined>;
   getProductsByTrader(traderId: string): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProductStock(id: string, quantity: number): Promise<Product | undefined>;
+  updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
+  deleteProduct(id: string): Promise<boolean>;
   
   // Comments
   getComment(id: string): Promise<Comment | undefined>;
@@ -44,6 +47,16 @@ export interface IStorage {
   isLiked(productId: string, userId: string): Promise<boolean>;
   createLike(like: InsertLike): Promise<Like>;
   deleteLike(productId: string, userId: string): Promise<boolean>;
+
+  // Orders (written by the Python payment service; read for the dashboard)
+  getOrdersByTrader(traderId: string): Promise<OrderWithProduct[]>;
+
+  // Follows
+  getFollowerCount(traderId: string): Promise<number>;
+  isFollowing(traderId: string, userId: string): Promise<boolean>;
+  createFollow(follow: InsertFollow): Promise<Follow>;
+  deleteFollow(traderId: string, userId: string): Promise<boolean>;
+  getFollowedTraderIds(userId: string): Promise<string[]>;
 
   // Guest -> account data migration on login
   mergeGuestData(guestId: string, userId: string, userName: string): Promise<void>;
@@ -293,7 +306,19 @@ export class SupabaseStorage implements IStorage {
       .select('*')
       .eq('id', id)
       .single();
-    
+
+    if (error) return undefined;
+    return toCamelCase(data);
+  }
+
+  async updateTrader(id: string, updates: Partial<InsertTrader>): Promise<Trader | undefined> {
+    const { data, error } = await supabase
+      .from('traders')
+      .update(toSnakeCase(updates))
+      .eq('id', id)
+      .select()
+      .single();
+
     if (error) return undefined;
     return toCamelCase(data);
   }
@@ -367,9 +392,31 @@ export class SupabaseStorage implements IStorage {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) return undefined;
     return toCamelCase(data);
+  }
+
+  async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined> {
+    const { data, error } = await supabase
+      .from('products')
+      .update(toSnakeCase(updates))
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) return undefined;
+    return toCamelCase(data);
+  }
+
+  async deleteProduct(id: string): Promise<boolean> {
+    // Soft delete — keeps the row so existing orders still resolve the product
+    const { error } = await supabase
+      .from('products')
+      .update({ is_active: false })
+      .eq('id', id);
+
+    return !error;
   }
 
   // Comments methods
@@ -560,6 +607,88 @@ export class SupabaseStorage implements IStorage {
     return !error;
   }
 
+  async getOrdersByTrader(traderId: string): Promise<OrderWithProduct[]> {
+    // products(...) is a PostgREST embed via the orders.product_id FK
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, products(name, image_url)')
+      .eq('trader_id', traderId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      console.error('Error fetching orders:', error);
+      return [];
+    }
+
+    return (data || []).map((row: any) => {
+      const { products, ...order } = row;
+      return {
+        ...toCamelCase(order),
+        productName: products?.name ?? null,
+        productImageUrl: products?.image_url ?? null,
+      };
+    });
+  }
+
+  async getFollowerCount(traderId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('follows')
+      .select('*', { count: 'exact', head: true })
+      .eq('trader_id', traderId);
+
+    if (error) {
+      console.error('Error fetching follower count:', error);
+      return 0;
+    }
+    return count || 0;
+  }
+
+  async isFollowing(traderId: string, userId: string): Promise<boolean> {
+    const { data, error } = await supabase
+      .from('follows')
+      .select('id')
+      .eq('trader_id', traderId)
+      .eq('user_id', userId)
+      .single();
+
+    return !!data && !error;
+  }
+
+  async createFollow(insertFollow: InsertFollow): Promise<Follow> {
+    const { data, error } = await supabase
+      .from('follows')
+      .insert([toSnakeCase(insertFollow)])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return toCamelCase(data);
+  }
+
+  async deleteFollow(traderId: string, userId: string): Promise<boolean> {
+    const { error } = await supabase
+      .from('follows')
+      .delete()
+      .eq('trader_id', traderId)
+      .eq('user_id', userId);
+
+    return !error;
+  }
+
+  async getFollowedTraderIds(userId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('follows')
+      .select('trader_id')
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error fetching followed traders:', error);
+      return [];
+    }
+    return (data || []).map((row) => row.trader_id);
+  }
+
   async mergeGuestData(guestId: string, userId: string, userName: string): Promise<void> {
     // Reassign guest rows to the account; where the account already has the
     // same product (unique constraint), drop the guest duplicate instead.
@@ -589,6 +718,18 @@ export class SupabaseStorage implements IStorage {
       .from('comments')
       .update({ user_id: userId, user_name: userName })
       .eq('user_id', guestId);
+
+    const { data: guestFollows } = await supabase
+      .from('follows')
+      .select('id, trader_id')
+      .eq('user_id', guestId);
+    for (const follow of guestFollows || []) {
+      if (await this.isFollowing(follow.trader_id, userId)) {
+        await supabase.from('follows').delete().eq('id', follow.id);
+      } else {
+        await supabase.from('follows').update({ user_id: userId }).eq('id', follow.id);
+      }
+    }
   }
 }
 
@@ -670,6 +811,14 @@ export class MemStorage implements IStorage {
     return this.traders.get(id);
   }
 
+  async updateTrader(id: string, updates: Partial<InsertTrader>): Promise<Trader | undefined> {
+    const trader = this.traders.get(id);
+    if (!trader) return undefined;
+    const updated = { ...trader, ...updates } as Trader;
+    this.traders.set(id, updated);
+    return updated;
+  }
+
   async getAllProducts(): Promise<Product[]> {
     return Array.from(this.products.values()).filter((p) => p.isActive);
   }
@@ -702,10 +851,26 @@ export class MemStorage implements IStorage {
   async updateProductStock(id: string, quantity: number): Promise<Product | undefined> {
     const product = this.products.get(id);
     if (!product) return undefined;
-    
+
     const updated = { ...product, stockQuantity: quantity };
     this.products.set(id, updated);
     return updated;
+  }
+
+  async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined> {
+    const product = this.products.get(id);
+    if (!product) return undefined;
+
+    const updated = { ...product, ...updates } as Product;
+    this.products.set(id, updated);
+    return updated;
+  }
+
+  async deleteProduct(id: string): Promise<boolean> {
+    const product = this.products.get(id);
+    if (!product) return false;
+    this.products.set(id, { ...product, isActive: false });
+    return true;
   }
 
   // Comments methods (in-memory stubs)
@@ -788,8 +953,32 @@ export class MemStorage implements IStorage {
     return true;
   }
 
+  async getOrdersByTrader(traderId: string): Promise<OrderWithProduct[]> {
+    return [];
+  }
+
+  async getFollowerCount(traderId: string): Promise<number> {
+    return 0;
+  }
+
+  async isFollowing(traderId: string, userId: string): Promise<boolean> {
+    return false;
+  }
+
+  async createFollow(follow: InsertFollow): Promise<Follow> {
+    return { id: randomUUID(), ...follow, createdAt: new Date().toISOString() };
+  }
+
+  async deleteFollow(traderId: string, userId: string): Promise<boolean> {
+    return true;
+  }
+
+  async getFollowedTraderIds(userId: string): Promise<string[]> {
+    return [];
+  }
+
   async mergeGuestData(guestId: string, userId: string, userName: string): Promise<void> {
-    // No-op: MemStorage doesn't persist likes/favorites/comments
+    // No-op: MemStorage doesn't persist likes/favorites/comments/follows
   }
 }
 
