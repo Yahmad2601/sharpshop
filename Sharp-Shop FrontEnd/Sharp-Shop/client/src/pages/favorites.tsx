@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type Product } from "@shared/schema";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductSkeleton } from "@/components/ProductSkeleton";
+import { BottomNav } from "@/components/BottomNav";
 import { useFavorites } from "@/hooks/use-favorites";
 import { Heart, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,8 @@ export default function Favorites() {
             </div>
           )}
         </div>
+
+        <BottomNav />
       </div>
     </div>
   );

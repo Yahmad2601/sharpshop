@@ -30,6 +30,17 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Split stable vendor code from app code so app changes don't bust the
+        // whole cache, and the browser can parse chunks in parallel.
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "wouter"],
+          "vendor-motion": ["framer-motion"],
+          "vendor-data": ["@tanstack/react-query", "@supabase/supabase-js"],
+        },
+      },
+    },
   },
   server: {
     fs: {

@@ -6,7 +6,9 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+// Time a dismissed toast stays in state before removal (shadcn ships 1000000ms
+// ≈ 16min, which keeps dead toasts and their timers in memory)
+const TOAST_REMOVE_DELAY = 5000
 
 type ToasterToast = ToastProps & {
   id: string
