@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { type Server } from "http";
 import { storage } from "./storage";
 import {
@@ -16,6 +16,16 @@ const PRODUCT_UPDATABLE_FIELDS = ["name", "price", "description", "category", "s
 function effectiveUserId(req: Request, bodyUserId: unknown): string {
   if (req.isAuthenticated()) return String(req.user!.id);
   return typeof bodyUserId === "string" ? bodyUserId : "";
+}
+
+// Social writes (like/save/comment/follow) require a signed-in account.
+// Guests can browse and read, but the UI prompts them to log in for actions —
+// this enforces the same rule server-side.
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: "Sign in to do that" });
+  }
+  next();
 }
 
 // Resolves the product and confirms the logged-in seller owns it.
@@ -246,7 +256,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/follows", async (req, res) => {
+  app.post("/api/follows", requireAuth, async (req, res) => {
     try {
       const parsed = insertFollowSchema.safeParse({
         ...req.body,
@@ -266,7 +276,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/follows", async (req, res) => {
+  app.delete("/api/follows", requireAuth, async (req, res) => {
     try {
       const { traderId } = req.body;
       const userId = effectiveUserId(req, req.body?.userId);
@@ -322,7 +332,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/comments", async (req, res) => {
+  app.post("/api/comments", requireAuth, async (req, res) => {
     try {
       const parsed = insertCommentSchema.safeParse({
         ...req.body,
@@ -381,7 +391,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/favorites", async (req, res) => {
+  app.post("/api/favorites", requireAuth, async (req, res) => {
     try {
       const parsed = insertFavoriteSchema.safeParse({
         ...req.body,
@@ -403,7 +413,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/favorites", async (req, res) => {
+  app.delete("/api/favorites", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
       const userId = effectiveUserId(req, req.body?.userId);
@@ -471,7 +481,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/likes", async (req, res) => {
+  app.post("/api/likes", requireAuth, async (req, res) => {
     try {
       const parsed = insertLikeSchema.safeParse({
         ...req.body,
@@ -493,7 +503,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/likes", async (req, res) => {
+  app.delete("/api/likes", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
       const userId = effectiveUserId(req, req.body?.userId);

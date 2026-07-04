@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Home, Heart, Plus, User, LayoutDashboard, LogOut } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFavorites } from "@/hooks/use-favorites";
 import { useToast } from "@/hooks/use-toast";
+import { promptLogin } from "@/lib/auth-prompt";
+import { LogoutConfirmDialog } from "@/components/LogoutConfirmDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,11 +14,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-interface BottomNavProps {
-  /** Called when a logged-out user taps Account (Home passes its auth modal opener). */
-  onRequireAuth?: () => void;
-}
 
 function NavButton({
   active,
@@ -32,6 +30,7 @@ function NavButton({
     <button
       onClick={onClick}
       aria-label={label}
+      aria-current={active ? "page" : undefined}
       className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors ${
         active ? "text-white" : "text-white/50 hover:text-white/80"
       }`}
@@ -46,11 +45,12 @@ function NavButton({
  * TikTok-style bottom navigation. Lives inside the phone frame (absolute, not
  * fixed) so it works in the desktop frame too.
  */
-export function BottomNav({ onRequireAuth }: BottomNavProps) {
+export function BottomNav() {
   const [location, setLocation] = useLocation();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { count: favoritesCount } = useFavorites();
   const { toast } = useToast();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const handleUpload = () => {
     if (user?.role === "seller") {
@@ -58,6 +58,8 @@ export function BottomNav({ onRequireAuth }: BottomNavProps) {
         "https://wa.me/14155238886?text=Hi,%20I%20want%20to%20add%20a%20product",
         "_blank"
       );
+    } else if (!user) {
+      promptLogin();
     } else {
       toast({
         title: "Sellers only",
@@ -137,17 +139,22 @@ export function BottomNav({ onRequireAuth }: BottomNavProps) {
                 </DropdownMenuItem>
               </Link>
             )}
-            <DropdownMenuItem onClick={logout} className="text-red-600 cursor-pointer">
+            <DropdownMenuItem
+              onClick={() => setShowLogoutConfirm(true)}
+              className="text-red-600 cursor-pointer"
+            >
               <LogOut className="w-4 h-4 mr-2" />
               Logout
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <NavButton label="Sign in" onClick={() => onRequireAuth?.()}>
+        <NavButton label="Sign in" onClick={promptLogin}>
           <User className="w-5 h-5" />
         </NavButton>
       )}
+
+      <LogoutConfirmDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm} />
     </nav>
   );
 }

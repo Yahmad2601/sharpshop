@@ -36,7 +36,7 @@ export default function PayCallback() {
   }, [verify]);
 
   return (
-    <div className="h-screen w-full bg-black flex items-center justify-center">
+    <div className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center">
       <div className="absolute inset-0 hidden md:block bg-gradient-to-br from-neutral-900 via-black to-neutral-900" />
       <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
 

@@ -21,6 +21,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ProductSkeleton } from "@/components/ProductSkeleton";
 import { ProductEditModal } from "@/components/ProductEditModal";
 import { ProfileEditModal } from "@/components/ProfileEditModal";
+import { LogoutConfirmDialog } from "@/components/LogoutConfirmDialog";
 import { useToast } from "@/hooks/use-toast";
 import { 
   ArrowLeft, 
@@ -71,7 +72,7 @@ function OrderRow({ order }: { order: OrderWithProduct }) {
           </span>
         </div>
         <p className="text-emerald-400 text-sm font-bold">₦{Number(order.amount).toLocaleString()}</p>
-        <p className="text-white/40 text-[11px]">
+        <p className="text-white/60 text-[11px]">
           {order.fulfillmentType === "pickup" ? "Pickup" : "Delivery"} • {formatOrderTime(order.createdAt)}
         </p>
         {details && (details.name || details.phone || details.address) && (
@@ -85,7 +86,7 @@ function OrderRow({ order }: { order: OrderWithProduct }) {
 }
 
 export default function SellerDashboard() {
-  const { user, logout, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -93,6 +94,7 @@ export default function SellerDashboard() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "seller")) {
@@ -135,7 +137,7 @@ export default function SellerDashboard() {
 
   if (authLoading || traderLoading || productsLoading) {
     return (
-      <div className="h-screen w-full bg-black flex items-center justify-center">
+      <div className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center">
         <div className="absolute inset-0 hidden md:block bg-gradient-to-br from-neutral-900 via-black to-neutral-900" />
         <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
         
@@ -161,7 +163,7 @@ export default function SellerDashboard() {
   const inventoryValue = products?.reduce((sum, p) => sum + p.price * p.stockQuantity, 0) || 0;
 
   return (
-    <div className="h-screen w-full bg-black flex items-center justify-center">
+    <div className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center">
       <div className="absolute inset-0 hidden md:block bg-gradient-to-br from-neutral-900 via-black to-neutral-900" />
       <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
       
@@ -198,8 +200,9 @@ export default function SellerDashboard() {
                     <Button
                       size="icon"
                       variant="secondary"
+                      aria-label="Log out"
                       className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-red-500 hover:bg-red-500/20"
-                      onClick={() => logout()}
+                      onClick={() => setShowLogoutConfirm(true)}
                     >
                         <LogOut className="w-5 h-5" />
                     </Button>
@@ -399,7 +402,7 @@ export default function SellerDashboard() {
                         <div className="flex flex-col items-center justify-center py-20 text-white/40">
                             <Package className="w-12 h-12 mb-4 opacity-50" />
                             <p className="text-sm">No orders yet</p>
-                            <p className="text-xs mt-1 text-white/30">Paid orders will appear here automatically</p>
+                            <p className="text-xs mt-1 text-white/50">Paid orders will appear here automatically</p>
                         </div>
                     )}
                 </TabsContent>
@@ -418,6 +421,8 @@ export default function SellerDashboard() {
         isOpen={isEditingProfile}
         onClose={() => setIsEditingProfile(false)}
       />
+
+      <LogoutConfirmDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm} />
 
       <AlertDialog open={!!deletingProduct} onOpenChange={(o) => !o && setDeletingProduct(null)}>
         <AlertDialogContent className="bg-[#1a1a1a] border-white/10 text-white">
