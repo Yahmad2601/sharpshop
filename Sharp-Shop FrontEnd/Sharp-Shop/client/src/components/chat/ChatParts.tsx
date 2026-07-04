@@ -28,6 +28,7 @@ export function ChatHeader({ traderName, onClose }: { traderName: string; onClos
       <Button
         variant="ghost"
         size="icon"
+        aria-label="Close chat"
         className="h-8 w-8 text-white/50 hover:text-white hover:bg-white/10"
         onClick={onClose}
       >
@@ -67,7 +68,8 @@ export function ChatMessages({
 
   return (
     <ScrollArea className="flex-1 p-4 bg-[#121212]">
-      <div className="space-y-4">
+      {/* role=log + aria-live so screen readers announce assistant replies */}
+      <div className="space-y-4" role="log" aria-live="polite" aria-label="Chat messages">
         <div className="flex gap-3">
           <AssistantAvatar />
           <div className="bg-[#222] p-3 rounded-2xl rounded-tl-none text-white/90 text-sm max-w-[80%] border border-white/5">
@@ -148,12 +150,14 @@ export function ChatInput({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && onSend()}
         placeholder="Ask about products..."
-        className="bg-[#121212] border-white/10 text-white placeholder:text-white/30 focus-visible:ring-emerald-500"
+        aria-label="Ask about products"
+        className="bg-[#121212] border-white/10 text-white placeholder:text-white/50 focus-visible:ring-emerald-500"
       />
       <Button
         onClick={onSend}
         disabled={!value.trim() || isLoading}
         size="icon"
+        aria-label="Send message"
         className="bg-emerald-500 hover:bg-emerald-600 text-white"
       >
         <Send className="h-5 w-5" />

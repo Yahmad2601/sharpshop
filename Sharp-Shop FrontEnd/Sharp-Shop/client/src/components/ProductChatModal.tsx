@@ -1,5 +1,5 @@
 import { useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { useCustomerChat } from "@/hooks/use-customer-chat";
 import { ChatHeader, ChatMessages, ChatProductStrip, ChatInput } from "@/components/chat/ChatParts";
 
@@ -11,6 +11,11 @@ interface ProductChatModalProps {
   productName?: string;
 }
 
+/**
+ * Bottom-sheet product chat. Built on vaul/Radix Drawer so it gets dialog
+ * semantics, focus trapping, Escape-to-close, and swipe-to-dismiss for free
+ * (the previous hand-rolled motion.div had none of those).
+ */
 export function ProductChatModal({
   isOpen,
   onClose,
@@ -33,42 +38,26 @@ export function ProductChatModal({
   }, [isOpen, productName]);
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          />
-
-          {/* Bottom Sheet */}
-          <motion.div
-            initial={{ opacity: 0, y: "100%" }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-0 left-0 right-0 z-50 h-[65dvh] max-h-[560px] bg-[#1a1a1a] rounded-t-3xl shadow-2xl flex flex-col overflow-hidden md:max-w-[430px] md:mx-auto"
-          >
-            <ChatHeader traderName={traderName} onClose={onClose} />
-            <ChatMessages
-              welcomeText={`Hello! I'm here to help you with products from ${traderName}. What would you like to know?`}
-              messages={messages}
-              isLoading={isLoading}
-            />
-            <ChatProductStrip products={products} />
-            <ChatInput
-              value={inputValue}
-              onChange={setInputValue}
-              onSend={() => sendMessage()}
-              isLoading={isLoading}
-            />
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+    <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent
+        aria-describedby={undefined}
+        className="h-[65vh] supports-[height:65dvh]:h-[65dvh] max-h-[560px] bg-[#1a1a1a] border-white/10 text-white p-0 md:max-w-[430px] md:mx-auto"
+      >
+        <DrawerTitle className="sr-only">Chat with {traderName} assistant</DrawerTitle>
+        <ChatHeader traderName={traderName} onClose={onClose} />
+        <ChatMessages
+          welcomeText={`Hello! I'm here to help you with products from ${traderName}. What would you like to know?`}
+          messages={messages}
+          isLoading={isLoading}
+        />
+        <ChatProductStrip products={products} />
+        <ChatInput
+          value={inputValue}
+          onChange={setInputValue}
+          onSend={() => sendMessage()}
+          isLoading={isLoading}
+        />
+      </DrawerContent>
+    </Drawer>
   );
 }

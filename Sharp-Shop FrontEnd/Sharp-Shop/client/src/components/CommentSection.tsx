@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { getGuestId, getGuestName } from "@/lib/guest";
+import { promptLogin } from "@/lib/auth-prompt";
 
 interface Comment {
   id: string;
@@ -104,6 +105,11 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
   });
 
   const handleAddComment = () => {
+    // Guests can read comments but must sign in to post
+    if (!user) {
+      promptLogin();
+      return;
+    }
     if (!newComment.trim()) return;
     addCommentMutation.mutate(newComment);
   };
@@ -164,7 +170,7 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
             {EMOJIS.map((emoji) => (
               <button
                 key={emoji}
-                onClick={() => setNewComment((prev) => prev + emoji)}
+                onClick={() => (user ? setNewComment((prev) => prev + emoji) : promptLogin())}
                 className="text-2xl hover:scale-110 transition-transform"
               >
                 {emoji}
@@ -180,7 +186,9 @@ export function CommentSection({ children, trigger, productId }: CommentSectionP
               <Input
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
-                placeholder="Add a comment..."
+                onClick={() => !user && promptLogin()}
+                readOnly={!user}
+                placeholder={user ? "Add a comment..." : "Log in to comment..."}
                 className="bg-white/10 border-none text-white placeholder:text-white/50 pr-10 h-10 rounded-full focus-visible:ring-1 focus-visible:ring-white/20"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleAddComment();

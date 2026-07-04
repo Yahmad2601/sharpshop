@@ -15,6 +15,7 @@ import { CommentSection } from "./CommentSection";
 import { ProductChatModal } from "./ProductChatModal";
 import { CHAT_API_BASE } from "@/lib/api";
 import { shareLink } from "@/lib/share";
+import { promptLogin } from "@/lib/auth-prompt";
 
 interface ProductCardProps {
   product: Product;
@@ -45,10 +46,11 @@ const RailButton = forwardRef<HTMLButtonElement, RailButtonProps>(
       ref={ref}
       data-testid={testId}
       {...rest}
-      className="flex flex-col items-center gap-1"
+      // p-2 -m-1 grows the hit area to ~44px without shifting the layout
+      className="flex flex-col items-center gap-1 p-2 -m-1"
     >
       {children}
-      <span className="text-white text-xs font-semibold drop-shadow-md min-h-[14px]">
+      <span aria-hidden="true" className="text-white text-xs font-semibold drop-shadow-md min-h-[14px]">
         {label ?? ""}
       </span>
     </button>
@@ -69,6 +71,10 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
 
   const isSoldOut = product.stockQuantity === 0;
   const isProductFavorite = isFavorite(product.id);
+
+  // Guests can browse but must sign in to interact
+  const handleLike = () => (user ? toggleLike() : promptLogin());
+  const handleSave = () => (user ? toggleFavorite(product.id) : promptLogin());
 
   const handleBuyClick = async () => {
     try {
@@ -197,13 +203,13 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
       {/* Right action rail — TikTok style */}
       <div className="absolute bottom-40 right-2 z-20 flex flex-col gap-4 items-center">
         {/* Seller avatar with the follow "+" — tap to open the shop */}
-        <Link href={`/trader/${product.traderId}`}>
+        <Link href={`/trader/${product.traderId}`} aria-label={`Visit ${product.traderName} shop`}>
           <div className="relative cursor-pointer mb-1" data-testid={`rail-avatar-${product.id}`}>
             <Avatar className="h-12 w-12 border-2 border-white shadow-lg">
-              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(product.traderName)}`} />
+              <AvatarImage alt="" src={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(product.traderName)}`} />
               <AvatarFallback className="bg-primary text-white text-sm">{product.traderName[0]}</AvatarFallback>
             </Avatar>
-            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-emerald-500 rounded-full p-0.5 border-2 border-black/40">
+            <div aria-hidden="true" className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-emerald-500 rounded-full p-0.5 border-2 border-black/40">
               <Plus className="w-3 h-3 text-white" strokeWidth={3} />
             </div>
           </div>
@@ -212,7 +218,9 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
         <RailButton
           testId={`button-like-${product.id}`}
           label={likeCount > 0 ? likeCount.toLocaleString() : ""}
-          onClick={toggleLike}
+          onClick={handleLike}
+          aria-label={`Like ${product.name}, ${likeCount} ${likeCount === 1 ? "like" : "likes"}`}
+          aria-pressed={isLiked}
         >
           <Heart
             className={`w-8 h-8 drop-shadow-md transition-all ${
@@ -225,7 +233,11 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
         <CommentSection
           productId={product.id}
           trigger={(count) => (
-            <RailButton testId={`button-comment-${product.id}`} label={count > 0 ? count : ""}>
+            <RailButton
+              testId={`button-comment-${product.id}`}
+              label={count > 0 ? count : ""}
+              aria-label={`View comments, ${count} ${count === 1 ? "comment" : "comments"}`}
+            >
               <MessageCircle className="w-8 h-8 fill-white text-white drop-shadow-md" strokeWidth={0} />
             </RailButton>
           )}
@@ -233,7 +245,9 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
 
         <RailButton
           testId={`button-favorite-${product.id}`}
-          onClick={() => toggleFavorite(product.id)}
+          onClick={handleSave}
+          aria-label={isProductFavorite ? "Remove from saved" : "Save product"}
+          aria-pressed={isProductFavorite}
         >
           <Bookmark
             className={`w-8 h-8 drop-shadow-md transition-all ${
@@ -243,7 +257,11 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
           />
         </RailButton>
 
-        <RailButton testId={`button-share-${product.id}`} onClick={handleShare}>
+        <RailButton
+          testId={`button-share-${product.id}`}
+          onClick={handleShare}
+          aria-label={`Share ${product.name}`}
+        >
           <Share2 className="w-7 h-7 text-white drop-shadow-md" />
         </RailButton>
       </div>
@@ -278,15 +296,17 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
           <StockIndicator quantity={product.stockQuantity} />
         </div>
 
-        <p
+        <button
+          type="button"
           data-testid={`text-product-description-${product.id}`}
           onClick={() => setIsDescExpanded(!isDescExpanded)}
-          className={`text-sm text-white/85 leading-relaxed cursor-pointer drop-shadow-md ${
+          aria-expanded={isDescExpanded}
+          className={`block w-full text-left text-sm text-white/85 leading-relaxed cursor-pointer drop-shadow-md ${
             isDescExpanded ? "" : "line-clamp-1"
           }`}
         >
           {product.description}
-        </p>
+        </button>
 
         <div className="pt-2 pr-0 -mr-16">
           <ActionButtons

@@ -18,6 +18,7 @@ export function SearchBar({ value, onChange, placeholder = "Search products..." 
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        aria-label="Search products"
         className="pl-10 pr-10 h-10 bg-white/10 border-white/20 text-white placeholder:text-white/50 focus-visible:ring-white/30"
       />
       {value && (
@@ -25,6 +26,7 @@ export function SearchBar({ value, onChange, placeholder = "Search products..." 
           data-testid="button-clear-search"
           size="icon"
           variant="ghost"
+          aria-label="Clear search"
           onClick={() => onChange("")}
           className="absolute right-1 h-8 w-8 text-white/50"
         >

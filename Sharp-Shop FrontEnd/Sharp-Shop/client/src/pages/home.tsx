@@ -5,7 +5,6 @@ import { ProductCard } from "@/components/ProductCard";
 import { ProductSkeleton } from "@/components/ProductSkeleton";
 import { SearchBar } from "@/components/SearchBar";
 import { CategoryFilter } from "@/components/CategoryFilter";
-import { AuthModal } from "@/components/AuthModal";
 import { BottomNav } from "@/components/BottomNav";
 import { useAuth } from "@/contexts/AuthContext";
 import { getGuestId } from "@/lib/guest";
@@ -66,7 +65,10 @@ function FeedContent({ products, storageKey }: { products: Product[]; storageKey
     <div
       ref={feedRef}
       data-testid="product-feed"
-      className="h-full w-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
+      role="region"
+      aria-label="Product feed"
+      tabIndex={0}
+      className="h-full w-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-white/40"
     >
       {products.map((product, i) =>
         Math.abs(i - currentIndex) <= RENDER_WINDOW ? (
@@ -174,6 +176,7 @@ function FeedTab({ active, onClick, children }: { active: boolean; onClick: () =
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`text-[15px] font-bold pb-1 border-b-2 transition-colors drop-shadow-md ${
         active ? "text-white border-white" : "text-white/60 border-transparent hover:text-white/80"
       }`}
@@ -188,24 +191,28 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState<ProductCategory | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [feedMode, setFeedMode] = useState<FeedMode>("forYou");
-  const { user, isLoading: isAuthLoading } = useAuth();
+  const { user } = useAuth();
   const followUserId = user?.id ? String(user.id) : getGuestId();
-  const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Show auth modal if user is not logged in and auth check is done
-  useEffect(() => {
-    if (!isAuthLoading && !user) {
-      setShowAuthModal(true);
-    } else {
-      setShowAuthModal(false);
-    }
-  }, [isAuthLoading, user]);
+  // Guests roam freely; the login modal only appears when they attempt an
+  // interaction (like/save/comment/follow) via promptLogin().
 
   const closeSearch = () => {
     setSearchOpen(false);
     setSearchQuery("");
     setSelectedCategory(null);
   };
+
+  // Move focus into the search input when search mode opens, and back to the
+  // search launcher when it closes, so keyboard/SR users aren't dropped on <body>.
+  // The ref guard keeps it from stealing focus on initial page load.
+  const wasSearchOpenRef = useRef(false);
+  useEffect(() => {
+    if (searchOpen === wasSearchOpenRef.current) return;
+    wasSearchOpenRef.current = searchOpen;
+    const selector = searchOpen ? '[data-testid="input-search"]' : '[data-testid="button-open-search"]';
+    document.querySelector<HTMLElement>(selector)?.focus();
+  }, [searchOpen]);
 
   // Realtime updates come from the app-level subscription (use-realtime-sync);
   // the slow poll is only a fallback in case the websocket drops.
@@ -253,13 +260,15 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen h-[100dvh] w-full bg-black flex items-center justify-center">
+    <div className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center">
       <div className="absolute inset-0 hidden md:block bg-gradient-to-br from-neutral-900 via-black to-neutral-900" />
       <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
 
       <div className="relative w-full h-full md:max-w-[430px] md:h-[90vh] md:max-h-[900px] md:rounded-2xl md:overflow-hidden md:shadow-2xl md:shadow-black/50 md:border md:border-white/10 bg-black flex flex-col">
+        <h1 className="sr-only">SharpShop — {feedMode === "following" ? "Following" : "For You"} feed</h1>
+
         {/* Minimal top chrome — TikTok style: centered feed tabs, search on the right */}
-        <div className="absolute top-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-b from-black/70 via-black/30 to-transparent pointer-events-none">
+        <header className="absolute top-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-b from-black/70 via-black/30 to-transparent pointer-events-none">
           <div className="space-y-3 pointer-events-auto">
             {searchOpen ? (
               <>
@@ -328,19 +337,14 @@ export default function Home() {
               </div>
             )}
           </div>
-        </div>
+        </header>
 
-        <div className="absolute inset-0 z-0">
+        <main className="absolute inset-0 z-0">
           {content}
-        </div>
+        </main>
 
-        <BottomNav onRequireAuth={() => setShowAuthModal(true)} />
+        <BottomNav />
       </div>
-
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-      />
     </div>
   );
 }

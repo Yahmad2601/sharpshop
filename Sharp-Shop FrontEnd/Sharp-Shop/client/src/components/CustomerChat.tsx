@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,8 +12,25 @@ interface CustomerChatProps {
 
 export function CustomerChat({ traderId, traderName }: CustomerChatProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
   const { messages, inputValue, setInputValue, isLoading, products, sendMessage } =
     useCustomerChat(traderId);
+
+  // Non-modal panel, so no focus trap — but it should still behave like a
+  // dialog: focus moves to the input on open, Escape closes, and focus
+  // returns to the launcher button on close.
+  useEffect(() => {
+    if (isOpen) {
+      panelRef.current?.querySelector("input")?.focus();
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setIsOpen(false);
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }
+    launcherRef.current?.focus();
+  }, [isOpen]);
 
   return (
     <>
@@ -26,8 +43,11 @@ export function CustomerChat({ traderId, traderName }: CustomerChatProps) {
       >
         {!isOpen && (
           <Button
+            ref={launcherRef}
             onClick={() => setIsOpen(true)}
             size="icon"
+            aria-label={`Chat with ${traderName} assistant`}
+            aria-expanded={isOpen}
             className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-black hover:bg-neutral-900 text-white shadow-lg border border-white/20"
           >
             <MessageCircle className="h-6 w-6 md:h-8 md:w-8" />
@@ -39,6 +59,9 @@ export function CustomerChat({ traderId, traderName }: CustomerChatProps) {
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            ref={panelRef}
+            role="dialog"
+            aria-label={`Chat with ${traderName} assistant`}
             initial={{ opacity: 0, y: 100, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 100, scale: 0.9 }}

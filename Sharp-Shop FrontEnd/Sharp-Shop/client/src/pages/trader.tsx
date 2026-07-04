@@ -19,8 +19,10 @@ import { Link, useParams, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { CustomerChat } from "@/components/CustomerChat";
 import { useFollow } from "@/hooks/use-follow";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { shareLink } from "@/lib/share";
+import { promptLogin } from "@/lib/auth-prompt";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
@@ -33,7 +35,11 @@ export default function TraderProfile() {
   const params = useParams<{ traderId: string }>();
   const traderId = params.traderId;
   const { toast } = useToast();
+  const { user } = useAuth();
   const { followerCount, isFollowing, toggleFollow } = useFollow(traderId);
+
+  // Guests can view the shop but must sign in to follow
+  const handleFollow = () => (user ? toggleFollow() : promptLogin());
 
   const handleShare = async () => {
     const result = await shareLink(window.location.href, {
@@ -74,7 +80,7 @@ export default function TraderProfile() {
 
   if (isLoading || traderLoading) {
     return (
-      <div className="h-screen w-full bg-black flex items-center justify-center">
+      <div className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center">
         <div className="absolute inset-0 hidden md:block bg-gradient-to-br from-neutral-900 via-black to-neutral-900" />
         <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
 
@@ -87,7 +93,7 @@ export default function TraderProfile() {
 
   if (isError || traderError) {
     return (
-      <div className="h-screen w-full bg-black flex items-center justify-center">
+      <div className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center">
         <div className="absolute inset-0 hidden md:block bg-gradient-to-br from-neutral-900 via-black to-neutral-900" />
         <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
 
@@ -113,7 +119,7 @@ export default function TraderProfile() {
 
   return (
     <motion.div
-      className="h-screen w-full bg-black flex items-center justify-center"
+      className="h-screen supports-[height:100dvh]:h-[100dvh] w-full bg-black flex items-center justify-center"
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
       dragElastic={0.2}
@@ -190,7 +196,7 @@ export default function TraderProfile() {
               </Button>
             )}
             <Button
-              onClick={toggleFollow}
+              onClick={handleFollow}
               className={`flex-1 font-bold rounded-full h-10 text-base transition-colors ${
                 isFollowing
                   ? "bg-white/10 hover:bg-white/20 text-white border border-white/20"
@@ -238,16 +244,23 @@ export default function TraderProfile() {
             <TabsContent value="stories" className="mt-0 flex-1">
               <div className="grid grid-cols-3 gap-0.5 pb-20">
                 {products?.map((product) => (
-                  <div key={product.id} className="aspect-[3/4] relative bg-white/5 group cursor-pointer overflow-hidden">
-                    <img
-                      src={product.imageUrl}
-                      alt={product.name}
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                    />
-                    <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
-                      <p className="text-white text-[10px] font-bold truncate">{product.name}</p>
+                  <Link
+                    key={product.id}
+                    href={`/product/${product.id}`}
+                    aria-label={`View ${product.name}`}
+                  >
+                    <div className="aspect-[3/4] relative bg-white/5 group cursor-pointer overflow-hidden">
+                      <img
+                        src={product.imageUrl}
+                        alt={product.name}
+                        loading="lazy"
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                      />
+                      <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
+                        <p className="text-white text-[10px] font-bold truncate">{product.name}</p>
+                      </div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
                 {/* Fill with placeholders if few products */}
                 {Array.from({ length: Math.max(0, 9 - (products?.length || 0)) }).map((_, i) => (

@@ -131,6 +131,38 @@ describe("product ownership", () => {
   });
 });
 
+describe("guest social writes are blocked (login required)", () => {
+  it.each([
+    ["POST", "/api/likes"],
+    ["DELETE", "/api/likes"],
+    ["POST", "/api/favorites"],
+    ["DELETE", "/api/favorites"],
+    ["POST", "/api/follows"],
+    ["DELETE", "/api/follows"],
+    ["POST", "/api/comments"],
+  ] as const)("%s %s -> 401 for guests", async (method, path) => {
+    const res = await (method === "POST"
+      ? request(app).post(path)
+      : request(app).delete(path)
+    ).send({ productId: "x", traderId: "x", userId: "guest_abc", userName: "G", content: "hi" });
+    expect(res.status).toBe(401);
+  });
+
+  it("logged-in users can still like", async () => {
+    const { agent, trader } = await registerSeller("SocialShop");
+    const product = await seedProduct(trader.id);
+    const res = await agent.post("/api/likes").send({ productId: product.id });
+    expect([200, 201]).toContain(res.status);
+  });
+
+  it("guest reads still work (counts + feed)", async () => {
+    const counts = await request(app).get("/api/likes/counts");
+    expect(counts.status).toBe(200);
+    const feed = await request(app).get("/api/feed/following/guest_reader");
+    expect(feed.status).toBe(200);
+  });
+});
+
 describe("follow feed identity guard", () => {
   it("blocks reading another account's following feed", async () => {
     const res = await request(app).get("/api/feed/following/some-real-account-id");

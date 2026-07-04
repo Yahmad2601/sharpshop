@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Mail, Lock, User, Store, Phone, MapPin, ArrowRight, Loader2 } from "lucide-react";
+import { Mail, Lock, User, Store, Phone, MapPin, Loader2 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { useToast } from "../hooks/use-toast";
 import { WhatsAppConnect } from "./WhatsAppConnect";
 
@@ -123,38 +123,25 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-50"
-          />
-
-          {/* Modal */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            transition={{ type: "spring", duration: 0.5, bounce: 0.3 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
-          >
-            <div className="relative w-full max-w-md pointer-events-auto">
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent
+          aria-describedby={undefined}
+          className="max-w-md w-[calc(100vw-2rem)] p-0 bg-transparent border-none shadow-none overflow-visible"
+        >
+            <div className="relative w-full">
               {/* Decorative background blobs */}
-              <div className="absolute -top-20 -left-20 w-64 h-64 bg-blue-500/30 rounded-full blur-3xl animate-pulse" />
-              <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-purple-500/30 rounded-full blur-3xl animate-pulse delay-1000" />
+              <div aria-hidden="true" className="absolute -top-20 -left-20 w-64 h-64 bg-blue-500/30 rounded-full blur-3xl animate-pulse" />
+              <div aria-hidden="true" className="absolute -bottom-20 -right-20 w-64 h-64 bg-purple-500/30 rounded-full blur-3xl animate-pulse delay-1000" />
 
               <div className="relative bg-white/10 dark:bg-black/40 backdrop-blur-2xl border border-white/20 dark:border-white/10 rounded-3xl shadow-2xl overflow-hidden">
                 {/* Header */}
                 <div className="p-8 pb-0">
                   <div className="flex justify-between items-start mb-6">
                     <div>
-                      <h2 className="text-3xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+                      <DialogTitle className="text-3xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
                         {mode === "login" ? "Welcome Back" : "Join SharpShop"}
-                      </h2>
+                      </DialogTitle>
                       <p className="text-white/60 mt-2">
                         {mode === "login" ? "Enter your details to continue" : "Create an account to get started"}
                       </p>
@@ -191,11 +178,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                   {mode === "login" ? (
                     <form onSubmit={handleLogin} className="space-y-5">
                       <div className="space-y-2">
-                        <Label className="text-white/80">Username or Email</Label>
+                        <Label htmlFor="login-username" className="text-white/80">Username or Email</Label>
                         <div className="relative group">
                           <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                           <Input
+                            id="login-username"
                             type="text"
+                            autoComplete="username"
                             placeholder="Enter username or email"
                             className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                             value={loginData.username}
@@ -206,11 +195,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                       </div>
 
                       <div className="space-y-2">
-                        <Label className="text-white/80">Password</Label>
+                        <Label htmlFor="login-password" className="text-white/80">Password</Label>
                         <div className="relative group">
                           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                           <Input
+                            id="login-password"
                             type="password"
+                            autoComplete="current-password"
                             placeholder="Enter your password"
                             className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                             value={loginData.password}
@@ -235,6 +226,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         <button
                           type="button"
                           onClick={() => setRole("buyer")}
+                          aria-pressed={role === "buyer"}
                           className={`p-4 rounded-xl border transition-all duration-200 text-left ${
                             role === "buyer"
                               ? "bg-blue-500/20 border-blue-500/50 shadow-lg shadow-blue-500/10"
@@ -247,6 +239,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         <button
                           type="button"
                           onClick={() => setRole("seller")}
+                          aria-pressed={role === "seller"}
                           className={`p-4 rounded-xl border transition-all duration-200 text-left ${
                             role === "seller"
                               ? "bg-purple-500/20 border-purple-500/50 shadow-lg shadow-purple-500/10"
@@ -261,11 +254,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                       <div className="space-y-4">
                         {role === "buyer" ? (
                           <div className="space-y-2">
-                            <Label className="text-white/80">Username *</Label>
+                            <Label htmlFor="signup-username" className="text-white/80">Username *</Label>
                             <div className="relative group">
                               <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                               <Input
+                                id="signup-username"
                                 type="text"
+                                autoComplete="username"
                                 placeholder="Choose a username"
                                 className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                                 value={signupData.username}
@@ -276,11 +271,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                           </div>
                         ) : (
                           <div className="space-y-2">
-                            <Label className="text-white/80">Business Name *</Label>
+                            <Label htmlFor="signup-business" className="text-white/80">Business Name *</Label>
                             <div className="relative group">
                               <Store className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                               <Input
+                                id="signup-business"
                                 type="text"
+                                autoComplete="organization"
                                 placeholder="Your business/shop name"
                                 className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                                 value={signupData.businessName}
@@ -292,11 +289,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         )}
 
                         <div className="space-y-2">
-                          <Label className="text-white/80">Email</Label>
+                          <Label htmlFor="signup-email" className="text-white/80">Email</Label>
                           <div className="relative group">
                             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                             <Input
+                              id="signup-email"
                               type="email"
+                              autoComplete="email"
                               placeholder="your@email.com"
                               className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                               value={signupData.email}
@@ -307,9 +306,11 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
 
                         {role === "buyer" && (
                           <div className="space-y-2">
-                            <Label className="text-white/80">Full Name</Label>
+                            <Label htmlFor="signup-fullname" className="text-white/80">Full Name</Label>
                             <Input
+                              id="signup-fullname"
                               type="text"
+                              autoComplete="name"
                               placeholder="Your full name"
                               className="h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                               value={signupData.fullName}
@@ -321,11 +322,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         {role === "seller" && (
                           <>
                             <div className="space-y-2">
-                              <Label className="text-white/80">WhatsApp Number</Label>
+                              <Label htmlFor="signup-whatsapp" className="text-white/80">WhatsApp Number</Label>
                               <div className="relative group">
                                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-purple-400 transition-colors" />
                                 <Input
+                                  id="signup-whatsapp"
                                   type="tel"
+                                  autoComplete="tel"
                                   placeholder="e.g., 2348123456789"
                                   className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-purple-500/50 focus:ring-purple-500/20 rounded-xl transition-all"
                                   value={signupData.whatsappNumber}
@@ -335,11 +338,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                             </div>
 
                             <div className="space-y-2">
-                              <Label className="text-white/80">Business Address</Label>
+                              <Label htmlFor="signup-address" className="text-white/80">Business Address</Label>
                               <div className="relative group">
                                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-purple-400 transition-colors" />
                                 <Input
+                                  id="signup-address"
                                   type="text"
+                                  autoComplete="street-address"
                                   placeholder="Your business location"
                                   className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-purple-500/50 focus:ring-purple-500/20 rounded-xl transition-all"
                                   value={signupData.address}
@@ -351,11 +356,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         )}
 
                         <div className="space-y-2">
-                          <Label className="text-white/80">Password *</Label>
+                          <Label htmlFor="signup-password" className="text-white/80">Password *</Label>
                           <div className="relative group">
                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                             <Input
+                              id="signup-password"
                               type="password"
+                              autoComplete="new-password"
                               placeholder="Create a password"
                               className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                               value={signupData.password}
@@ -366,11 +373,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         </div>
 
                         <div className="space-y-2">
-                          <Label className="text-white/80">Confirm Password *</Label>
+                          <Label htmlFor="signup-confirm" className="text-white/80">Confirm Password *</Label>
                           <div className="relative group">
                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
                             <Input
+                              id="signup-confirm"
                               type="password"
+                              autoComplete="new-password"
                               placeholder="Confirm your password"
                               className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                               value={signupData.confirmPassword}
@@ -393,9 +402,8 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                 </div>
               </div>
             </div>
-          </motion.div>
-        </>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* WhatsApp Connect Modal for Sellers */}
       <WhatsAppConnect
@@ -406,6 +414,6 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
         }}
         businessName={registeredBusinessName}
       />
-    </AnimatePresence>
+    </>
   );
 }
