@@ -4,7 +4,7 @@ export function ProductSkeleton() {
   return (
     <div
       data-testid="skeleton-product-card"
-      className="h-full min-h-screen md:min-h-full w-full snap-start snap-always relative flex flex-col justify-end overflow-hidden flex-shrink-0"
+      className="h-full w-full snap-start snap-always relative flex flex-col justify-end overflow-hidden flex-shrink-0"
     >
       <div className="absolute inset-0 bg-gradient-to-b from-neutral-800 via-neutral-700 to-neutral-900 animate-pulse" />
       

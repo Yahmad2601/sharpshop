@@ -176,7 +176,7 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
         }
       }}
       data-testid={`card-product-${product.id}`}
-      className="h-full min-h-screen md:min-h-full w-full snap-start snap-always relative flex flex-col justify-end overflow-hidden flex-shrink-0"
+      className="h-full w-full snap-start snap-always relative flex flex-col justify-end overflow-hidden flex-shrink-0"
     >
       {!imageError ? (
         <img
@@ -266,8 +266,9 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
         </RailButton>
       </div>
 
-      {/* Bottom info + CTA */}
-      <div className="relative z-10 p-4 pb-20 pr-20 space-y-2">
+      {/* Bottom info + CTA — bottom padding clears the nav bar plus the iPhone
+          home-indicator safe area so Buy Now is always fully visible */}
+      <div className="relative z-10 p-4 pr-20 space-y-2 pb-[calc(5rem+env(safe-area-inset-bottom))]">
         <Link href={`/trader/${product.traderId}`}>
           <span className="text-white font-bold text-[15px] drop-shadow-md cursor-pointer hover:underline">
             @{product.traderName}

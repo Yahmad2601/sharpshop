@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthPromptHost } from "@/components/AuthPromptHost";
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import NotFound from "@/pages/not-found";
@@ -13,6 +14,7 @@ import TraderProfile from "@/pages/trader";
 import SellerDashboard from "@/pages/seller-dashboard";
 import PayCallback from "@/pages/pay-callback";
 import ProductPage from "@/pages/product";
+import Settings from "@/pages/settings";
 
 function Router() {
   return (
@@ -22,6 +24,7 @@ function Router() {
       <Route path="/trader/:traderId" component={TraderProfile} />
       <Route path="/product/:productId" component={ProductPage} />
       <Route path="/seller/dashboard" component={SellerDashboard} />
+      <Route path="/settings" component={Settings} />
       <Route path="/pay/callback" component={PayCallback} />
       <Route component={NotFound} />
     </Switch>
@@ -37,6 +40,7 @@ function RealtimeSync() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
       <AuthProvider>
         <TooltipProvider>
           <RealtimeSync />
@@ -45,6 +49,7 @@ function App() {
           <Router />
         </TooltipProvider>
       </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

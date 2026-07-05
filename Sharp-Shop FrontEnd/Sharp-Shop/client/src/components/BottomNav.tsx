@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Home, Heart, Plus, User, LayoutDashboard, LogOut } from "lucide-react";
+import { Home, Heart, Plus, User, LayoutDashboard, LogOut, Settings } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFavorites } from "@/hooks/use-favorites";
@@ -69,7 +69,8 @@ export function BottomNav() {
   };
 
   return (
-    <nav className="absolute bottom-0 left-0 right-0 z-30 h-14 bg-black/85 backdrop-blur-md border-t border-white/10 flex items-stretch">
+    // pb-[env(...)] keeps the nav above the iPhone home indicator (viewport-fit=cover)
+    <nav className="absolute bottom-0 left-0 right-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-black/85 backdrop-blur-md border-t border-white/10 flex items-stretch">
       <NavButton active={location === "/"} label="Home" onClick={() => setLocation("/")}>
         <Home className="w-5 h-5" />
       </NavButton>
@@ -139,6 +140,12 @@ export function BottomNav() {
                 </DropdownMenuItem>
               </Link>
             )}
+            <Link href="/settings">
+              <DropdownMenuItem className="cursor-pointer">
+                <Settings className="w-4 h-4 mr-2" />
+                Settings
+              </DropdownMenuItem>
+            </Link>
             <DropdownMenuItem
               onClick={() => setShowLogoutConfirm(true)}
               className="text-red-600 cursor-pointer"

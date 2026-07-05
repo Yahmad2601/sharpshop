@@ -77,7 +77,7 @@ function FeedContent({ products, storageKey }: { products: Product[]; storageKey
           // Placeholder shell with identical sizing/snap so scroll geometry is stable
           <div
             key={product.id}
-            className="h-full min-h-screen md:min-h-full w-full snap-start snap-always flex-shrink-0 bg-neutral-900"
+            className="h-full w-full snap-start snap-always flex-shrink-0 bg-neutral-900"
           />
         )
       )}

@@ -192,8 +192,9 @@ export default function SellerDashboard() {
                     <Button
                       size="icon"
                       variant="secondary"
+                      aria-label="Settings"
                       className="h-10 w-10 rounded-full bg-black/40 backdrop-blur-md border-none text-white hover:bg-black/60"
-                      onClick={() => setIsEditingProfile(true)}
+                      onClick={() => setLocation("/settings")}
                     >
                         <Settings className="w-5 h-5" />
                     </Button>
