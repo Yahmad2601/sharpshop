@@ -61,10 +61,12 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, updates: Partial<Pick<User, "fullName" | "phone" | "address">>): Promise<User | undefined>;
   deleteUser(id: string): Promise<boolean>;
-  
+
   createTrader(trader: InsertTrader): Promise<Trader>;
   getTrader(id: string): Promise<Trader | undefined>;
+  getTraderByPhone(phone: string): Promise<Trader | undefined>;
   getTraderByUserId(userId: string): Promise<Trader | undefined>;
   updateTrader(id: string, updates: Partial<InsertTrader>): Promise<Trader | undefined>;
   
@@ -137,7 +139,15 @@ function toSnakeCase(obj: any): any {
   return converted;
 }
 
-const mockProducts: Product[] = [
+// The last 10 digits uniquely identify a Nigerian subscriber number regardless
+// of the prefix it's written with (local "0803…", international "+234803…", or
+// bare "234803…"). Vanity shop URLs like /08012345678 are matched this way.
+export function phoneKey(phone: string | null | undefined): string {
+  const digits = (phone || "").replace(/\D/g, "");
+  return digits.slice(-10);
+}
+
+const mockProductsRaw = [
   {
     id: "prod_001",
     traderId: "trader_001",
@@ -244,6 +254,13 @@ const mockProducts: Product[] = [
   },
 ];
 
+const mockProducts: Product[] = mockProductsRaw.map((p) => ({
+  ...p,
+  isPreorder: false,
+  orderDeadline: null,
+  maxCapacity: null,
+}));
+
 // Supabase Storage Implementation
 export class SupabaseStorage implements IStorage {
   sessionStore: session.Store;
@@ -317,6 +334,18 @@ export class SupabaseStorage implements IStorage {
     return toCamelCase(data);
   }
 
+  async updateUser(id: string, updates: Partial<Pick<User, "fullName" | "phone" | "address">>): Promise<User | undefined> {
+    const { data, error } = await supabase
+      .from('users')
+      .update(toSnakeCase(updates))
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) return undefined;
+    return toCamelCase(data);
+  }
+
   async deleteUser(id: string): Promise<boolean> {
     const { error } = await supabase
       .from('users')
@@ -358,6 +387,20 @@ export class SupabaseStorage implements IStorage {
 
     if (error) return undefined;
     return toCamelCase(data);
+  }
+
+  async getTraderByPhone(phone: string): Promise<Trader | undefined> {
+    const key = phoneKey(phone);
+    if (key.length < 10) return undefined;
+    // Match on the trailing digits so any stored format (+234…, 234…, 0…) resolves.
+    const { data, error } = await supabase
+      .from('traders')
+      .select('*')
+      .ilike('whatsapp_number', `%${key}`)
+      .limit(1);
+
+    if (error || !data || data.length === 0) return undefined;
+    return toCamelCase(data[0]);
   }
 
   async updateTrader(id: string, updates: Partial<InsertTrader>): Promise<Trader | undefined> {
@@ -835,17 +878,27 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { 
-      ...insertUser, 
-      id, 
-      role: insertUser.role || 'buyer', 
-      email: insertUser.email || null, 
+    const user: User = {
+      ...insertUser,
+      id,
+      role: insertUser.role || 'buyer',
+      email: insertUser.email || null,
       fullName: insertUser.fullName || null,
+      phone: insertUser.phone || null,
+      address: insertUser.address || null,
       businessName: insertUser.businessName || null,
       createdAt: new Date().toISOString()
     };
     this.users.set(id, user);
     return user;
+  }
+
+  async updateUser(id: string, updates: Partial<Pick<User, "fullName" | "phone" | "address">>): Promise<User | undefined> {
+    const user = this.users.get(id);
+    if (!user) return undefined;
+    const updated = { ...user, ...updates } as User;
+    this.users.set(id, updated);
+    return updated;
   }
 
   async deleteUser(id: string): Promise<boolean> {
@@ -874,6 +927,14 @@ export class MemStorage implements IStorage {
 
   async getTrader(id: string): Promise<Trader | undefined> {
     return this.traders.get(id);
+  }
+
+  async getTraderByPhone(phone: string): Promise<Trader | undefined> {
+    const key = phoneKey(phone);
+    if (key.length < 10) return undefined;
+    return Array.from(this.traders.values()).find(
+      (trader) => phoneKey(trader.whatsappNumber) === key,
+    );
   }
 
   async updateTrader(id: string, updates: Partial<InsertTrader>): Promise<Trader | undefined> {
@@ -908,6 +969,9 @@ export class MemStorage implements IStorage {
       stockQuantity: insertProduct.stockQuantity ?? 0,
       isActive: insertProduct.isActive ?? true,
       whatsappNumber: insertProduct.whatsappNumber ?? null,
+      isPreorder: insertProduct.isPreorder ?? false,
+      orderDeadline: insertProduct.orderDeadline ?? null,
+      maxCapacity: insertProduct.maxCapacity ?? null,
     };
     this.products.set(id, product);
     return product;

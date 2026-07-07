@@ -153,6 +153,24 @@ function NoProductsState() {
   );
 }
 
+function DropsEmptyState() {
+  return (
+    <div
+      data-testid="drops-empty-state"
+      className="h-full w-full flex flex-col items-center justify-center bg-black text-white p-6"
+    >
+      <div className="w-24 h-24 rounded-full bg-white/10 flex items-center justify-center mb-6">
+        <span className="text-4xl" aria-hidden="true">🔥</span>
+      </div>
+      <h2 className="text-xl font-bold mb-2">No live drops right now</h2>
+      <p className="text-white/70 text-center">
+        Pre-order drops from bakers and makers will appear here — first come,
+        first served.
+      </p>
+    </div>
+  );
+}
+
 function FollowingEmptyState() {
   return (
     <div
@@ -170,7 +188,7 @@ function FollowingEmptyState() {
   );
 }
 
-type FeedMode = "forYou" | "following";
+type FeedMode = "forYou" | "following" | "drops";
 
 function FeedTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -226,8 +244,27 @@ export default function Home() {
     enabled: feedMode === "following",
   });
 
-  const { data: products, isLoading, isError, refetch } =
-    feedMode === "following" ? followingQuery : forYouQuery;
+  // Live pre-order drops: deadline still open (or none) with slots left,
+  // soonest deadline first — derived from the main products list.
+  const dropsProducts = useMemo(() => {
+    const now = Date.now();
+    return (forYouQuery.data ?? [])
+      .filter(
+        (p) =>
+          p.isPreorder &&
+          p.stockQuantity > 0 &&
+          (!p.orderDeadline || new Date(p.orderDeadline).getTime() > now)
+      )
+      .sort((a, b) => {
+        const da = a.orderDeadline ? new Date(a.orderDeadline).getTime() : Infinity;
+        const db = b.orderDeadline ? new Date(b.orderDeadline).getTime() : Infinity;
+        return da - db;
+      });
+  }, [forYouQuery.data]);
+
+  const activeQuery = feedMode === "following" ? followingQuery : forYouQuery;
+  const { isLoading, isError, refetch } = activeQuery;
+  const products = feedMode === "drops" ? dropsProducts : activeQuery.data;
 
   const filteredProducts = useMemo(() => {
     if (!products) return [];
@@ -252,7 +289,10 @@ export default function Home() {
   } else if (isError) {
     content = <ErrorState onRetry={() => refetch()} />;
   } else if (!products || products.length === 0) {
-    content = feedMode === "following" ? <FollowingEmptyState /> : <NoProductsState />;
+    content =
+      feedMode === "following" ? <FollowingEmptyState />
+      : feedMode === "drops" ? <DropsEmptyState />
+      : <NoProductsState />;
   } else if (filteredProducts.length === 0) {
     content = <EmptyState />;
   } else {
@@ -265,7 +305,9 @@ export default function Home() {
       <div className="absolute inset-0 hidden md:block backdrop-blur-sm bg-black/60" />
 
       <div className="relative w-full h-full md:max-w-[430px] md:h-[90vh] md:max-h-[900px] md:rounded-2xl md:overflow-hidden md:shadow-2xl md:shadow-black/50 md:border md:border-white/10 bg-black flex flex-col">
-        <h1 className="sr-only">SharpShop — {feedMode === "following" ? "Following" : "For You"} feed</h1>
+        <h1 className="sr-only">
+          SharpShop — {feedMode === "following" ? "Following" : feedMode === "drops" ? "Drops" : "For You"} feed
+        </h1>
 
         {/* Minimal top chrome — TikTok style: centered feed tabs, search on the right */}
         <header className="absolute top-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-b from-black/70 via-black/30 to-transparent pointer-events-none">
@@ -318,12 +360,15 @@ export default function Home() {
               </>
             ) : (
               <div className="relative flex items-center justify-center h-10">
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-5">
                   <FeedTab active={feedMode === "following"} onClick={() => setFeedMode("following")}>
                     Following
                   </FeedTab>
                   <FeedTab active={feedMode === "forYou"} onClick={() => setFeedMode("forYou")}>
                     For You
+                  </FeedTab>
+                  <FeedTab active={feedMode === "drops"} onClick={() => setFeedMode("drops")}>
+                    Drops 🔥
                   </FeedTab>
                 </div>
                 <button

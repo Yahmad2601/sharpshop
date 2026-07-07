@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { type Product, type Trader } from "@shared/schema";
+import NotFound from "@/pages/not-found";
 import { ProductSkeleton } from "@/components/ProductSkeleton";
 import {
   ArrowLeft,
@@ -32,10 +33,28 @@ function formatCount(n: number): string {
 
 export default function TraderProfile() {
   const [, setLocation] = useLocation();
-  const params = useParams<{ traderId: string }>();
-  const traderId = params.traderId;
+  // Two routes reach this page: /trader/:traderId (by shop id) and /:phone
+  // (vanity URL by the seller's phone number, e.g. sharpshop.app/08012345678).
+  const params = useParams<{ traderId?: string; phone?: string }>();
+  const phone = params.phone;
+  // Only treat the catch-all segment as a phone if it actually looks like one,
+  // so genuine typos (/setting, /abc) fall through to Not Found instead of a fetch.
+  const phoneIsValid = !phone || /^\+?\d{7,15}$/.test(phone);
   const { toast } = useToast();
   const { user } = useAuth();
+
+  // Resolve the shop by id or phone. traderId is only known after this resolves
+  // when we arrived via the phone route.
+  const {
+    data: trader,
+    isLoading: traderLoading,
+    isError: traderError,
+  } = useQuery<Trader>({
+    queryKey: phone ? ["/api/traders/by-phone", phone] : ["/api/traders", params.traderId],
+    enabled: !!((phone && phoneIsValid) || params.traderId),
+  });
+
+  const traderId = trader?.id ?? params.traderId;
   const { followerCount, isFollowing, toggleFollow } = useFollow(traderId);
 
   // Guests can view the shop but must sign in to follow
@@ -54,15 +73,6 @@ export default function TraderProfile() {
   };
 
   const {
-    data: trader,
-    isLoading: traderLoading,
-    isError: traderError,
-  } = useQuery<Trader>({
-    queryKey: ["/api/traders", traderId],
-    enabled: !!traderId,
-  });
-
-  const {
     data: products,
     isLoading,
     isError,
@@ -77,6 +87,11 @@ export default function TraderProfile() {
   const bio = trader?.bio || "Quality products at affordable prices. 🇳🇬";
   const location = trader?.address || "Nigeria";
   const whatsapp = trader?.whatsappNumber;
+
+  // A catch-all segment that isn't a phone number is just a bad URL.
+  if (phone && !phoneIsValid) {
+    return <NotFound />;
+  }
 
   if (isLoading || traderLoading) {
     return (

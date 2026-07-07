@@ -27,6 +27,7 @@ const registerSchema = z.object({
   fullName: z.string().max(100).optional(),
   businessName: z.string().max(100).optional(),
   whatsappNumber: z.string().max(20).optional(),
+  phone: z.string().max(20).optional(),
   address: z.string().max(200).optional(),
 });
 
@@ -132,7 +133,9 @@ export function setupAuth(app: Express) {
 
       const hashedPassword = await bcrypt.hash(input.password, 10);
 
-      // Only pass fields that belong to the users table
+      // Only pass fields that belong to the users table. For buyers, phone and
+      // address are their contact + default delivery details (prefilled into
+      // checkout later). For sellers those live on the trader profile instead.
       const user = await storage.createUser({
         username: input.username,
         email: input.email || undefined,
@@ -140,6 +143,8 @@ export function setupAuth(app: Express) {
         role: input.role,
         fullName: input.fullName,
         businessName: input.businessName,
+        phone: input.role === "buyer" ? input.phone : undefined,
+        address: input.role === "buyer" ? input.address : undefined,
       });
 
       // If user is a seller, create trader profile
@@ -184,5 +189,35 @@ export function setupAuth(app: Express) {
   app.get("/api/user", (req, res) => {
     if (!req.isAuthenticated()) return res.sendStatus(401);
     res.json(sanitizeUser(req.user!));
+  });
+
+  // Let a signed-in user (mainly buyers) update their contact + delivery
+  // details so checkout can be prefilled. Never lets role/password through.
+  const updateUserSchema = z.object({
+    fullName: z.string().max(100).optional(),
+    phone: z.string().max(20).optional(),
+    address: z.string().max(200).optional(),
+  });
+
+  app.patch("/api/user", async (req, res, next) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const parsed = updateUserSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const firstError = parsed.error.errors[0];
+        return res.status(400).send(`${firstError.path.join(".")}: ${firstError.message}`);
+      }
+      const updates = Object.fromEntries(
+        Object.entries(parsed.data).filter(([, v]) => v !== undefined),
+      );
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
+      const updated = await storage.updateUser(req.user!.id, updates);
+      if (!updated) return res.status(404).json({ message: "User not found" });
+      res.json(sanitizeUser(updated));
+    } catch (err) {
+      next(err);
+    }
   });
 }

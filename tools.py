@@ -2,9 +2,14 @@
 from typing import Optional
 from config import ALLOWED_CATEGORIES
 from database import get_supabase
+from customer_tools import parse_deadline, deadline_passed
 
 # Columns the agent is allowed to modify; anything else from LLM output is dropped
-UPDATABLE_FIELDS = {"price", "stock_quantity", "description", "name", "category", "is_active"}
+UPDATABLE_FIELDS = {
+    "price", "stock_quantity", "description", "name", "category", "is_active",
+    # Drop/pre-order fields (e.g. "extend my cupcake drop to Saturday")
+    "is_preorder", "order_deadline", "max_capacity",
+}
 
 def validate_product_data(data: dict) -> tuple[bool, str]:
     """Validate product data before creation/update."""
@@ -27,21 +32,36 @@ def create_product(
     whatsapp_number: str,
     description: Optional[str] = None,
     image: Optional[str] = None,
-    is_active: bool = True
+    is_active: bool = True,
+    is_preorder: bool = False,
+    order_deadline: Optional[str] = None,
+    max_capacity: Optional[int] = None,
 ) -> dict:
-    """Create a new product listing in Supabase."""
-    # Note: Removed condition/brand/size as they don't exist in the frontend schema
+    """Create a product listing. For pre-order "drops", stock_quantity holds
+    the remaining slots (initialized to max_capacity) so the existing atomic
+    decrement machinery enforces capacity."""
+    if is_preorder:
+        if not order_deadline or not max_capacity:
+            return {"success": False, "error": "A pre-order needs an order deadline and a maximum capacity."}
+        if parse_deadline(order_deadline) is None:
+            return {"success": False, "error": "I couldn't understand the order deadline date."}
+        if deadline_passed(order_deadline):
+            return {"success": False, "error": "That order deadline is already in the past."}
+        if not isinstance(max_capacity, int) or max_capacity < 1:
+            return {"success": False, "error": "Maximum capacity must be at least 1."}
+        stock = max_capacity  # remaining slots
+
     data = {"price": price, "category": category, "stock_quantity": stock}
     valid, error = validate_product_data(data)
     if not valid:
         return {"success": False, "error": error}
-    
+
     supabase = get_supabase()
-    
+
     # Image is now required - validated in agent before calling this function
     if not image:
         return {"success": False, "error": "Product image is required. Please send a photo of your product."}
-    
+
     product_data = {
         "trader_id": trader_id,
         "trader_name": trader_name,
@@ -52,7 +72,10 @@ def create_product(
         "stock_quantity": stock,
         "description": description or f"Great {name} available now!",
         "image_url": image,
-        "is_active": is_active
+        "is_active": is_active,
+        "is_preorder": is_preorder,
+        "order_deadline": parse_deadline(order_deadline).isoformat() if is_preorder else None,
+        "max_capacity": max_capacity if is_preorder else None,
     }
     
     try:

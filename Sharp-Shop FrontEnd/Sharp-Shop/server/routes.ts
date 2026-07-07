@@ -210,6 +210,20 @@ export async function registerRoutes(
     }
   });
 
+  // Vanity lookup: resolve a shop by its seller's phone number so
+  // sharpshop.app/08012345678 opens that seller's storefront.
+  app.get("/api/traders/by-phone/:phone", async (req, res) => {
+    try {
+      const trader = await storage.getTraderByPhone(req.params.phone);
+      if (!trader) {
+        return res.status(404).json({ message: "Trader not found" });
+      }
+      res.json(trader);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch trader" });
+    }
+  });
+
   app.get("/api/traders/:traderId", async (req, res) => {
     try {
       const trader = await storage.getTrader(req.params.traderId);

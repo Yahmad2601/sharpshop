@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, type Theme } from "@/contexts/ThemeContext";
 import { promptLogin } from "@/lib/auth-prompt";
 import { ProfileEditModal } from "@/components/ProfileEditModal";
+import { BuyerDetailsModal } from "@/components/BuyerDetailsModal";
 import { LogoutConfirmDialog } from "@/components/LogoutConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -19,6 +20,7 @@ import {
   LogIn,
   ExternalLink,
   LayoutDashboard,
+  MapPin,
 } from "lucide-react";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -66,6 +68,7 @@ export default function Settings() {
   const { user } = useAuth();
   const { theme, setTheme } = useTheme();
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isEditingBuyerDetails, setIsEditingBuyerDetails] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const { data: trader } = useQuery<Trader>({
@@ -119,6 +122,12 @@ export default function Settings() {
                       Seller dashboard
                     </Row>
                   </>
+                )}
+                {user.role === "buyer" && (
+                  <Row onClick={() => setIsEditingBuyerDetails(true)}>
+                    <MapPin className="w-4 h-4 shrink-0" />
+                    Delivery details
+                  </Row>
                 )}
               </>
             ) : (
@@ -189,6 +198,12 @@ export default function Settings() {
           trader={trader}
           isOpen={isEditingProfile}
           onClose={() => setIsEditingProfile(false)}
+        />
+      )}
+      {user?.role === "buyer" && (
+        <BuyerDetailsModal
+          isOpen={isEditingBuyerDetails}
+          onClose={() => setIsEditingBuyerDetails(false)}
         />
       )}
       <LogoutConfirmDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm} />

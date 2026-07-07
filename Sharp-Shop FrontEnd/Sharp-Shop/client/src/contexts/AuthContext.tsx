@@ -8,8 +8,15 @@ interface AuthContextType {
   user: User | null;
   login: (username: string, password: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
+  updateProfile: (data: ProfileUpdate) => Promise<void>;
   logout: () => Promise<void>;
   isLoading: boolean;
+}
+
+interface ProfileUpdate {
+  fullName?: string;
+  phone?: string;
+  address?: string;
 }
 
 interface RegisterData {
@@ -20,6 +27,7 @@ interface RegisterData {
   fullName?: string;
   businessName?: string;
   whatsappNumber?: string;
+  phone?: string;
   address?: string;
 }
 
@@ -105,6 +113,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await mergeGuestData();
   };
 
+  const updateProfile = async (data: ProfileUpdate) => {
+    const response = await apiClient.fetch("/api/user", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || "Update failed");
+    }
+
+    const userData = await response.json();
+    setUser(userData);
+  };
+
   const logout = async () => {
     await apiClient.fetch("/api/logout", {
       method: "POST",
@@ -113,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, register, updateProfile, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

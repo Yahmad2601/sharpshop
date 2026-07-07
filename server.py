@@ -23,13 +23,13 @@ logging.basicConfig(
 app = FastAPI()
 
 # CORS Configuration for production
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5000")
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 allowed_origins = [
     frontend_url,
     "https://sharpshop.app",
     "https://www.sharpshop.app",
     "https://sharpshop-frontend-011b1462cb27.herokuapp.com",
-    "http://localhost:5000",
+    "http://localhost:3000",
     "http://localhost:8001",
     "http://0.0.0.0:8001"
 ]
@@ -303,6 +303,7 @@ class CheckoutRequest(BaseModel):
     customer_email: str = "customer@sharpshop.app"
     customer_phone: str = "08000000000"
     customer_name: str = "SharpShop Customer"
+    delivery_address: str = ""
 
 class CheckoutResponse(BaseModel):
     order_id: str
@@ -327,7 +328,21 @@ async def create_checkout(request: CheckoutRequest, _rl: None = Depends(customer
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     if product.get("stock_quantity", 0) <= 0:
-        raise HTTPException(status_code=409, detail="Product is out of stock")
+        detail = "All slots are taken" if product.get("is_preorder") else "Product is out of stock"
+        raise HTTPException(status_code=409, detail=detail)
+    if product.get("is_preorder"):
+        from customer_tools import deadline_passed
+        if deadline_passed(product.get("order_deadline")):
+            raise HTTPException(status_code=409, detail="Orders for this drop have closed")
+
+    # Capture the buyer's contact + delivery details on the order so the seller
+    # can actually fulfil it. These come prefilled from the buyer's account.
+    delivery_details = {
+        "name": request.customer_name,
+        "phone": request.customer_phone,
+        "email": request.customer_email,
+        "address": request.delivery_address,
+    }
 
     # Create order in database (price already fetched above)
     order = await run_in_threadpool(
@@ -335,7 +350,7 @@ async def create_checkout(request: CheckoutRequest, _rl: None = Depends(customer
         request.trader_id,
         request.product_id,
         request.fulfillment_type,
-        {},  # Empty delivery details for now
+        delivery_details,
         product["price"],
     )
     

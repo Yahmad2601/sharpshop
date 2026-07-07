@@ -1,6 +1,7 @@
 """LangGraph-based AI agent for inventory management."""
 import json
 import re
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 # Load environment variables FIRST
@@ -13,10 +14,15 @@ from database import get_trader_by_whatsapp
 
 from config import GROQ_API_KEY, GROQ_BASE_URL, MODEL_NAME, ALLOWED_CATEGORIES
 from tools import create_product, query_inventory, update_product, list_products
+from customer_tools import parse_deadline
 
 REQUIRED_FIELDS = ["name", "price", "category", "stock"]
 # Keys the LLM may pass through to create_product(**data)
-CREATE_PRODUCT_FIELDS = {"name", "price", "category", "stock", "description"}
+CREATE_PRODUCT_FIELDS = {"name", "price", "category", "stock", "description",
+                         "is_preorder", "order_deadline", "max_capacity"}
+
+# West Africa Time (no DST) — used to resolve "Thursday night" style deadlines
+WAT = timezone(timedelta(hours=1))
 
 
 def normalize_naira_price(value) -> int | None:
@@ -126,7 +132,26 @@ For updating a product (price, stock, etc.):
 ```json
 {{"action": "update_product", "data": {{"product_name": "esp32 microcontroller", "updates": {{"price": 11000}}}}}}
 ```
-Note: You can update: price, stock_quantity, description, name, category, is_active.
+Note: You can update: price, stock_quantity, description, name, category, is_active, order_deadline, max_capacity.
+
+## Pre-orders / Drops (batch sellers: bakers, caterers, made-to-order)
+Some sellers sell BEFORE they make the product: "drop", "pre-order", "taking orders till Friday",
+"I dey collect orders", or a future pickup/delivery date. They have NO stock yet — their
+"inventory" is order slots in a future production run.
+- A pre-order needs BOTH: order_deadline (when orders stop) AND max_capacity (max orders they can fulfil).
+- If either is missing, DO NOT create the product yet. Ask conversationally, e.g.:
+  "Sounds delicious! 🧁 When do orders close? And what's the max you can make?"
+- Convert the deadline to ISO 8601 with the +01:00 Lagos offset, using the current date/time
+  provided below to resolve things like "Thursday night" (=> next Thursday 21:00).
+- Include in create_product data: "is_preorder": true, "order_deadline": "...", "max_capacity": N.
+  Do NOT include stock for pre-orders (slots are tracked automatically).
+- Food items => category "Food & Drinks".
+
+Example:
+"Red velvet cupcake drop for Friday, 2k. Orders close Thursday 9pm, I fit make 50"
+```json
+{{"action": "create_product", "data": {{"name": "Red Velvet Cupcakes (Friday Drop)", "price": 2000, "category": "Food & Drinks", "is_preorder": true, "order_deadline": "2026-07-09T21:00:00+01:00", "max_capacity": 50, "description": "Freshly baked red velvet cupcakes — Friday drop, pre-order only"}}}}
+```
 """
 
 
@@ -147,9 +172,11 @@ def create_client() -> OpenAI:
 def process_message(state: AgentState) -> AgentState:
     """Process incoming message and generate response."""
     client = create_client()
-    
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
+
+    # Current time lets the model resolve relative deadlines ("Thursday night")
+    now_wat = datetime.now(WAT).strftime("%A, %Y-%m-%d %H:%M")
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + f"\n\nCurrent date/time in Lagos (WAT, UTC+01:00): {now_wat}"}]
+
     # Add context about collected data if any
     if state["collected_data"]:
         context = f"\n\nCurrent collected data: {json.dumps(state['collected_data'])}"
@@ -238,6 +265,20 @@ def execute_action(state: AgentState) -> AgentState:
             new_state["collected_data"] = data  # keep what we have so far
             return new_state
 
+        # Pre-order drops need a deadline and a capacity; keep the collected
+        # data and ask until we have both (the "Push -> Order -> Make" flow).
+        if data.get("is_preorder"):
+            try:
+                data["max_capacity"] = int(data["max_capacity"]) if data.get("max_capacity") else None
+            except (TypeError, ValueError):
+                data["max_capacity"] = None
+            if not data.get("order_deadline") or not data.get("max_capacity"):
+                result_msg = "🧁 Sounds like a drop! Two quick things: when do orders close, and what's the maximum number of orders you can take?"
+                new_state = state.copy()
+                new_state["messages"] = state["messages"] + [{"role": "assistant", "content": result_msg}]
+                new_state["collected_data"] = data
+                return new_state
+
         try:
             data["stock"] = int(data.get("stock", 1))
         except (TypeError, ValueError):
@@ -261,7 +302,15 @@ def execute_action(state: AgentState) -> AgentState:
         data["image"] = state["image_url"]
         result = create_product(**data)
         if result["success"]:
-            result_msg = f"✅ Product added! Your {data.get('name', 'item')} is now listed. (ID: {result['product_id']})"
+            if data.get("is_preorder"):
+                deadline_dt = parse_deadline(data.get("order_deadline"))
+                nice = deadline_dt.strftime("%A %d %b, %I:%M %p") if deadline_dt else "the deadline"
+                result_msg = (
+                    f"✅ Drop created! '{data.get('name', 'item')}' is live. "
+                    f"I'll take orders until {nice} or until all {data.get('max_capacity')} slots fill up. 🧁"
+                )
+            else:
+                result_msg = f"✅ Product added! Your {data.get('name', 'item')} is now listed. (ID: {result['product_id']})"
         else:
             result_msg = f"❌ Couldn't add product: {result['error']}"
     

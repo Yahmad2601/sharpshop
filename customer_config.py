@@ -6,7 +6,7 @@ load_dotenv()
 # Model settings
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-ALLOWED_CATEGORIES = ["Electronics", "Fashion", "Footwear", "Accessories", "Home & Living"]
+ALLOWED_CATEGORIES = ["Electronics", "Fashion", "Footwear", "Accessories", "Home & Living", "Food & Drinks"]
 
 MODEL_NAME = os.getenv("CUSTOMER_AGENT_MODEL", "llama-3.3-70b-versatile")
 MODEL_TEMPERATURE = 0.7

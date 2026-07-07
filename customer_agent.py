@@ -206,7 +206,15 @@ def execute_tools(state: CustomerAgentState) -> CustomerAgentState:
                 top_results = result["results"][:3]
                 lines = ["Here is what I found:"]
                 for p in top_results:
-                    if p["stock_quantity"] > 0:
+                    if p.get("is_preorder"):
+                        from customer_tools import deadline_passed, parse_deadline
+                        if deadline_passed(p.get("order_deadline")) or p["stock_quantity"] <= 0:
+                            lines.append(f"- {p['name']} (Drop closed)")
+                        else:
+                            dl = parse_deadline(p.get("order_deadline"))
+                            closes = dl.strftime("%a %I:%M %p") if dl else "soon"
+                            lines.append(f"- {p['name']}: ₦{p['price']:,} (Pre-order · {p['stock_quantity']} slots left · closes {closes})")
+                    elif p["stock_quantity"] > 0:
                         lines.append(f"- {p['name']}: ₦{p['price']:,} ({p['stock_quantity']} in stock)")
                     else:
                         lines.append(f"- {p['name']} (Out of Stock)")

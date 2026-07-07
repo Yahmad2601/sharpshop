@@ -23,12 +23,13 @@ import { ProductEditModal } from "@/components/ProductEditModal";
 import { ProfileEditModal } from "@/components/ProfileEditModal";
 import { LogoutConfirmDialog } from "@/components/LogoutConfirmDialog";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  ArrowLeft, 
-  MapPin, 
-  Mail, 
-  Settings, 
-  ChevronDown, 
+import { shareLink } from "@/lib/share";
+import {
+  ArrowLeft,
+  MapPin,
+  Mail,
+  Settings,
+  ChevronDown,
   Star,
   Plus,
   Package,
@@ -37,7 +38,8 @@ import {
   Edit,
   LogOut,
   Trash2,
-  Phone
+  Phone,
+  Share2
 } from "lucide-react";
 
 const ORDER_STATUS_STYLES: Record<string, string> = {
@@ -156,6 +158,31 @@ export default function SellerDashboard() {
   const location = trader?.address || "Location not set";
   const whatsapp = trader?.whatsappNumber;
 
+  // Vanity storefront link the seller can hand to customers:
+  // sharpshop.app/08012345678 (local form of their WhatsApp number).
+  const phoneDigits = whatsapp ? whatsapp.replace(/\D/g, "").slice(-10) : "";
+  const shopUrl = phoneDigits.length === 10 ? `${window.location.origin}/0${phoneDigits}` : null;
+
+  const handleShareShop = async () => {
+    if (!shopUrl) {
+      toast({
+        title: "Add your WhatsApp number first",
+        description: "Your shareable shop link uses your WhatsApp number.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const result = await shareLink(shopUrl, {
+      title: traderName,
+      text: `Shop ${traderName} on SharpShop`,
+    });
+    if (result === "copied") {
+      toast({ title: "Shop link copied!", description: shopUrl });
+    } else if (result === "failed") {
+      toast({ title: "Couldn't share", description: "Please copy the link manually.", variant: "destructive" });
+    }
+  };
+
   // Real inventory stats derived from the product list
   const productCount = products?.length || 0;
   const totalStock = products?.reduce((sum, p) => sum + p.stockQuantity, 0) || 0;
@@ -240,10 +267,18 @@ export default function SellerDashboard() {
                     <Edit className="w-4 h-4 mr-2" />
                     Edit Profile
                 </Button>
-                
-                <Button 
-                    size="icon" 
-                    variant="secondary" 
+
+                <Button
+                    onClick={handleShareShop}
+                    className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-full h-10 text-base"
+                >
+                    <Share2 className="w-4 h-4 mr-2" />
+                    Share Shop
+                </Button>
+
+                <Button
+                    size="icon"
+                    variant="secondary"
                     className={`h-10 w-10 rounded-full bg-white/10 border-none text-white hover:bg-white/20 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
                     onClick={() => setIsExpanded(!isExpanded)}
                 >

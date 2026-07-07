@@ -36,6 +36,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
     fullName: "",
     businessName: "",
     whatsappNumber: "",
+    phone: "",
     address: "",
   });
 
@@ -74,20 +75,24 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
 
     setIsLoading(true);
     try {
-      // Normalize WhatsApp number to international format
-      let normalizedWhatsApp = signupData.whatsappNumber;
-      if (role === "seller" && normalizedWhatsApp) {
-        // Remove spaces and dashes
-        normalizedWhatsApp = normalizedWhatsApp.replace(/[\s-]/g, "");
-        // If starts with 0, replace with +234 (Nigeria)
-        if (normalizedWhatsApp.startsWith("0")) {
-          normalizedWhatsApp = "+234" + normalizedWhatsApp.slice(1);
-        }
-        // Ensure it starts with +
-        if (!normalizedWhatsApp.startsWith("+")) {
-          normalizedWhatsApp = "+" + normalizedWhatsApp;
-        }
-      }
+      // Normalize a Nigerian number to international format (+234…)
+      const normalizeNgPhone = (raw: string) => {
+        let n = raw.replace(/[\s-]/g, "");
+        if (!n) return n;
+        if (n.startsWith("0")) n = "+234" + n.slice(1);
+        if (!n.startsWith("+")) n = "+" + n;
+        return n;
+      };
+
+      const normalizedWhatsApp =
+        role === "seller" && signupData.whatsappNumber
+          ? normalizeNgPhone(signupData.whatsappNumber)
+          : signupData.whatsappNumber;
+
+      const normalizedBuyerPhone =
+        role === "buyer" && signupData.phone
+          ? normalizeNgPhone(signupData.phone)
+          : undefined;
 
       await register({
         username: role === "seller" ? signupData.businessName : signupData.username,
@@ -97,7 +102,8 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
         fullName: signupData.fullName || undefined,
         businessName: role === "seller" ? signupData.businessName : undefined,
         whatsappNumber: role === "seller" ? normalizedWhatsApp : undefined,
-        address: role === "seller" ? signupData.address : undefined,
+        phone: role === "buyer" ? normalizedBuyerPhone : undefined,
+        address: role === "buyer" ? signupData.address || undefined : signupData.address,
       });
       
       // For sellers, show WhatsApp connect modal
@@ -305,18 +311,53 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
                         </div>
 
                         {role === "buyer" && (
-                          <div className="space-y-2">
-                            <Label htmlFor="signup-fullname" className="text-white/80">Full Name</Label>
-                            <Input
-                              id="signup-fullname"
-                              type="text"
-                              autoComplete="name"
-                              placeholder="Your full name"
-                              className="h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
-                              value={signupData.fullName}
-                              onChange={(e) => setSignupData({ ...signupData, fullName: e.target.value })}
-                            />
-                          </div>
+                          <>
+                            <div className="space-y-2">
+                              <Label htmlFor="signup-fullname" className="text-white/80">Full Name</Label>
+                              <Input
+                                id="signup-fullname"
+                                type="text"
+                                autoComplete="name"
+                                placeholder="Your full name"
+                                className="h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
+                                value={signupData.fullName}
+                                onChange={(e) => setSignupData({ ...signupData, fullName: e.target.value })}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="signup-phone" className="text-white/80">Phone Number</Label>
+                              <div className="relative group">
+                                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
+                                <Input
+                                  id="signup-phone"
+                                  type="tel"
+                                  autoComplete="tel"
+                                  placeholder="e.g., 08012345678"
+                                  className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
+                                  value={signupData.phone}
+                                  onChange={(e) => setSignupData({ ...signupData, phone: e.target.value })}
+                                />
+                              </div>
+                              <p className="text-xs text-white/40">Used to reach you about orders and to speed up checkout.</p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="signup-delivery" className="text-white/80">Delivery Address</Label>
+                              <div className="relative group">
+                                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-blue-400 transition-colors" />
+                                <Input
+                                  id="signup-delivery"
+                                  type="text"
+                                  autoComplete="shipping street-address"
+                                  placeholder="Where should orders be delivered?"
+                                  className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:bg-white/10 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
+                                  value={signupData.address}
+                                  onChange={(e) => setSignupData({ ...signupData, address: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          </>
                         )}
 
                         {role === "seller" && (

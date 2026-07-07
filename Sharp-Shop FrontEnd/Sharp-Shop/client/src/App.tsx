@@ -26,6 +26,9 @@ function Router() {
       <Route path="/seller/dashboard" component={SellerDashboard} />
       <Route path="/settings" component={Settings} />
       <Route path="/pay/callback" component={PayCallback} />
+      {/* Vanity shop URL by seller phone, e.g. sharpshop.app/08012345678.
+          Kept last so it only catches single-segment paths no real route claimed. */}
+      <Route path="/:phone" component={TraderProfile} />
       <Route component={NotFound} />
     </Switch>
   );

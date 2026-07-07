@@ -1,6 +1,6 @@
-import { useState, memo, forwardRef } from "react";
+import { useState, useEffect, memo, forwardRef } from "react";
 import { motion } from "framer-motion";
-import { Heart, MessageCircle, Bookmark, Share2, Plus } from "lucide-react";
+import { Heart, MessageCircle, Bookmark, Share2, Plus, Flame } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { type Product } from "@shared/schema";
 import { StockIndicator } from "./StockIndicator";
@@ -19,6 +19,73 @@ import { promptLogin } from "@/lib/auth-prompt";
 
 interface ProductCardProps {
   product: Product;
+}
+
+function formatTimeLeft(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m ${String(sec).padStart(2, "0")}s`;
+}
+
+/** Countdown + slots progress for a pre-order "drop" — the hype machine. */
+function DropStatus({
+  product,
+  nowTs,
+  closed,
+}: {
+  product: Product;
+  nowTs: number;
+  closed: boolean;
+}) {
+  const deadlineMs = product.orderDeadline ? new Date(product.orderDeadline).getTime() : null;
+  const capacity = product.maxCapacity ?? 0;
+  const taken = Math.max(0, capacity - product.stockQuantity);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge className="bg-pink-500/90 text-white border-pink-400/50 backdrop-blur-sm text-[11px] gap-1">
+          <Flame className="w-3 h-3" />
+          Pre-order
+        </Badge>
+        {closed ? (
+          <span className="text-red-400 text-xs font-bold drop-shadow-md">Drop closed</span>
+        ) : deadlineMs !== null ? (
+          <span
+            role="timer"
+            aria-label="Time left to order"
+            className="text-white text-xs font-bold drop-shadow-md tabular-nums"
+          >
+            Orders close in {formatTimeLeft(deadlineMs - nowTs)}
+          </span>
+        ) : null}
+      </div>
+      {capacity > 0 && (
+        <div className="space-y-1 max-w-[230px]">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={capacity}
+            aria-valuenow={taken}
+            aria-label="Slots taken"
+            className="h-1.5 rounded-full bg-white/25 overflow-hidden"
+          >
+            <div
+              className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-[width] duration-500"
+              style={{ width: `${Math.min(100, (taken / capacity) * 100)}%` }}
+            />
+          </div>
+          <p className="text-white/90 text-xs font-semibold drop-shadow-md">
+            {taken} / {capacity} slots taken
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatPrice(price: number): string {
@@ -69,8 +136,21 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
   const { likeCount, isLiked, toggleLike } = useLikes(product.id);
   const { user } = useAuth();
 
-  const isSoldOut = product.stockQuantity === 0;
   const isProductFavorite = isFavorite(product.id);
+
+  // Pre-order "drop" state: a ticking clock (only for mounted drop cards)
+  // decides when the CTA flips to "Drop Closed".
+  const isDrop = !!product.isPreorder;
+  const deadlineMs = isDrop && product.orderDeadline ? new Date(product.orderDeadline).getTime() : null;
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadlineMs === null || Date.now() >= deadlineMs) return;
+    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [deadlineMs]);
+
+  const dropClosed = isDrop && deadlineMs !== null && nowTs >= deadlineMs;
+  const isSoldOut = product.stockQuantity === 0 || dropClosed;
 
   // Guests can browse but must sign in to interact
   const handleLike = () => (user ? toggleLike() : promptLogin());
@@ -88,6 +168,8 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
           product_id: product.id,
           customer_email: user?.email || "customer@sharpshop.app",
           customer_name: user?.fullName || user?.username || "SharpShop Customer",
+          customer_phone: user?.phone || undefined,
+          delivery_address: user?.address || undefined,
         }),
       });
 
@@ -290,12 +372,16 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-white/15 text-white border-white/20 backdrop-blur-sm text-[11px]">
-            {product.category}
-          </Badge>
-          <StockIndicator quantity={product.stockQuantity} />
-        </div>
+        {isDrop ? (
+          <DropStatus product={product} nowTs={nowTs} closed={dropClosed || product.stockQuantity === 0} />
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="bg-white/15 text-white border-white/20 backdrop-blur-sm text-[11px]">
+              {product.category}
+            </Badge>
+            <StockIndicator quantity={product.stockQuantity} />
+          </div>
+        )}
 
         <button
           type="button"
@@ -312,6 +398,8 @@ export const ProductCard = memo(function ProductCard({ product }: ProductCardPro
         <div className="pt-2 pr-0 -mr-16">
           <ActionButtons
             isSoldOut={isSoldOut}
+            buyLabel={isDrop ? "Pre-order" : "Buy Now"}
+            soldOutLabel={isDrop ? "Drop Closed" : "Sold Out"}
             onBuyClick={handleBuyClick}
             onChatClick={() => setIsChatOpen(true)}
           />

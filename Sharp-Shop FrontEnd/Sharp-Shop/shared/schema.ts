@@ -10,6 +10,8 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   role: text("role").notNull().default("buyer"), // 'buyer' or 'seller'
   fullName: text("full_name"),
+  phone: text("phone"), // Buyer contact number, used to prefill checkout
+  address: text("address"), // Buyer default delivery address, used to prefill checkout
   businessName: text("business_name"), // Only for sellers
   createdAt: text("created_at").default(sql`(current_timestamp)`),
 });
@@ -20,6 +22,8 @@ export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
   role: true,
   fullName: true,
+  phone: true,
+  address: true,
   businessName: true,
 });
 
@@ -50,6 +54,7 @@ export const PRODUCT_CATEGORIES = [
   "Footwear",
   "Accessories",
   "Home & Living",
+  "Food & Drinks",
 ] as const;
 
 export type ProductCategory = typeof PRODUCT_CATEGORIES[number];
@@ -66,6 +71,12 @@ export const products = pgTable("products", {
   stockQuantity: integer("stock_quantity").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
   whatsappNumber: text("whatsapp_number"),
+  // Pre-order / "Drop" model: sellers who sell BEFORE they make (bakers,
+  // caterers, made-to-order). stock_quantity holds the REMAINING SLOTS,
+  // initialized to maxCapacity; orderDeadline is when orders stop.
+  isPreorder: boolean("is_preorder").notNull().default(false),
+  orderDeadline: timestamp("order_deadline", { withTimezone: true, mode: "string" }),
+  maxCapacity: integer("max_capacity"),
 });
 
 export const insertProductSchema = createInsertSchema(products).omit({

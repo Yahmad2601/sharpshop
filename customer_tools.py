@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 import requests
 from database import get_supabase
@@ -8,6 +8,27 @@ from customer_config import FLUTTERWAVE_BASE_URL, FLUTTERWAVE_SECRET_KEY
 
 # (connect, read) timeouts for external payment gateway calls
 REQUEST_TIMEOUT = (5, 15)
+
+# --- Pre-order / "Drop" deadline helpers ---
+
+def parse_deadline(value) -> Optional[datetime]:
+    """Parse an order deadline into an aware datetime. Accepts ISO 8601;
+    naive values are assumed to be Lagos time (UTC+1)."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=1)))
+    return dt
+
+
+def deadline_passed(value) -> bool:
+    """True if a drop's order deadline is set and already in the past."""
+    dt = parse_deadline(value)
+    return dt is not None and datetime.now(timezone.utc) >= dt
 
 def get_shop_info(trader_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve trader profile information."""
@@ -73,7 +94,10 @@ def search_shop_products(trader_id: str, query: str) -> Dict[str, Any]:
             "category": p["category"],
             "stock_quantity": p["stock_quantity"],
             "image_url": p.get("image_url", ""),
-            "description": p.get("description", "")
+            "description": p.get("description", ""),
+            "is_preorder": p.get("is_preorder", False),
+            "order_deadline": p.get("order_deadline"),
+            "max_capacity": p.get("max_capacity"),
         })
         
     return {
@@ -96,11 +120,20 @@ def get_product_details(trader_id: str, product_id: str) -> Optional[Dict[str, A
     return None
 
 def check_product_availability(product_id: str, trader_id: str) -> Dict[str, Any]:
-    """Real-time stock check."""
+    """Real-time stock check. For pre-order drops, stock_quantity is the
+    remaining slots and the deadline also gates availability."""
     product = get_product_details(trader_id, product_id)
     if not product:
         return {"available": False, "stock_quantity": 0, "product_name": "Unknown"}
-        
+
+    if product.get("is_preorder") and deadline_passed(product.get("order_deadline")):
+        return {
+            "available": False,
+            "stock_quantity": product["stock_quantity"],
+            "product_name": product["name"],
+            "reason": "orders_closed",
+        }
+
     return {
         "available": product["stock_quantity"] > 0,
         "stock_quantity": product["stock_quantity"],
@@ -126,10 +159,12 @@ def create_order(trader_id: str, product_id: str, fulfillment_type: str, deliver
     """Create a new order. Pass `amount` if the product price is already known to skip a fetch."""
     supabase = get_supabase()
 
+    prod = get_product_details(trader_id, product_id)
+    if not prod:
+        raise ValueError(f"Product {product_id} not found for trader {trader_id}")
+    if prod.get("is_preorder") and deadline_passed(prod.get("order_deadline")):
+        raise ValueError("Orders for this drop have closed")
     if amount is None:
-        prod = get_product_details(trader_id, product_id)
-        if not prod:
-            raise ValueError(f"Product {product_id} not found for trader {trader_id}")
         amount = prod["price"]
 
     order_data = {
